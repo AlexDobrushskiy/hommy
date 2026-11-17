@@ -1,0 +1,41 @@
+# macOS / editors
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Go
+/bin/
+/dist/
+dist/
+/hommy
+*.test
+*.out
+coverage.*
+go.work
+go.work.sum
+
+# Node
+node_modules/
+.npm/
+*.tsbuildinfo
+
+# Playwright and browser profiles (auth state never enters the repo)
+e2e/.auth/
+e2e/test-results/
+e2e/playwright-report/
+e2e/.cache/
+test-results/
+playwright-report/
+blob-report/
+
+# Local dev state: test HOMEs, logs, pid files, fake-server data
+.dev/
+*.log
+.env*
+!.env.example
+
+# Agent / pipeline scratch
+.lane.md
+.opencode/
+__pycache__/

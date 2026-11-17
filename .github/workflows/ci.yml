@@ -1,0 +1,70 @@
+name: ci
+
+on:
+  push:
+    branches: [main, 'ci-probe/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# Skeleton: green while the repo holds no Go module. Phase 01 adds the leak-scan job and scripts/ci-preflight.sh.
+# hommy is macOS-only (launchd, Keychain, TCC), so Go runs on macOS; the cheap `detect` job keeps that runner from
+# starting while there is no go.mod. The repo variable CREW_RUNS_ON (a JSON runs-on value) moves the Go job elsewhere,
+# e.g. to a self-hosted runner if Actions minutes run out:
+#   gh variable set CREW_RUNS_ON -R AlexDobrushskiy/hommy --body '["self-hosted","macOS","ARM64"]'
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      go: ${{ steps.d.outputs.go }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: d
+        run: if [ -f go.mod ]; then echo go=true; else echo go=false; fi >> "$GITHUB_OUTPUT"
+
+  go:
+    needs: detect
+    if: needs.detect.outputs.go == 'true'
+    runs-on: ${{ fromJSON(vars.CREW_RUNS_ON || '"macos-latest"') }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then echo "gofmt needed:"; echo "$out"; exit 1; fi
+      - name: go vet
+        run: go vet ./...
+      - name: go test
+        run: go test -count=1 ./...
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    env:
+      SHELLCHECK_VERSION: v0.11.0
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install shellcheck ${{ env.SHELLCHECK_VERSION }}
+        run: |
+          curl -fsSL "https://github.com/koalaman/shellcheck/releases/download/${SHELLCHECK_VERSION}/shellcheck-${SHELLCHECK_VERSION}.linux.x86_64.tar.xz" | tar -xJ -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/shellcheck-${SHELLCHECK_VERSION}" >> "$GITHUB_PATH"
+      - name: shellcheck (tracked sh/bash scripts; shellcheck does not read zsh)
+        run: |
+          shellcheck --version
+          git ls-files -z | while IFS= read -r -d '' f; do
+            [ -f "$f" ] || continue
+            case $f in
+              *.sh | *.bash) printf '%s\0' "$f" ;;
+              *) if head -n 1 "$f" | grep -Eq '^#!.*[/ ](ba)?sh([[:space:]]|$)'; then printf '%s\0' "$f"; fi ;;
+            esac
+          done > "$RUNNER_TEMP/files"
+          if [ ! -s "$RUNNER_TEMP/files" ]; then echo "no shell scripts to check"; exit 0; fi
+          tr '\0' '\n' < "$RUNNER_TEMP/files"
+          xargs -0 shellcheck < "$RUNNER_TEMP/files"
