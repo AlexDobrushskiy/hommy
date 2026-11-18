@@ -40,7 +40,7 @@ Watch a whole errand without booking anything real: [the barber demo](docs/usage
 
 ## Docs
 
-| | |
+| Doc | What it covers |
 |---|---|
 | [docs/install.md](docs/install.md) | installer flags, what gets installed, setup step by step, pairing, unattended install, uninstall |
 | [docs/usage.md](docs/usage.md) | what you can send, chat commands, voices, the barber demo |
