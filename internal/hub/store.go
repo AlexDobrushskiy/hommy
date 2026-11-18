@@ -73,12 +73,6 @@ CREATE TABLE IF NOT EXISTS jobs(
   done_at     REAL);
 CREATE INDEX IF NOT EXISTS jobs_host_status ON jobs(host, status);
 CREATE INDEX IF NOT EXISTS jobs_lane ON jobs(lane, status, seq, sub);
-CREATE TABLE IF NOT EXISTS done_ledger(
-  event_id TEXT PRIMARY KEY,
-  job_id   TEXT NOT NULL,
-  host     TEXT NOT NULL,
-  status   TEXT NOT NULL,
-  done_at  REAL NOT NULL);
 CREATE TABLE IF NOT EXISTS messages(
   chat_id    INTEGER NOT NULL,
   msg_id     INTEGER NOT NULL,
@@ -441,9 +435,9 @@ func (s *Store) MarkStarted(id string, now time.Time) (bool, error) {
 	return n == 1, nil
 }
 
-// SetResult stores the host's result once, mirrors it into the done ledger
-// and, for a run_p, saves the session the run ended on, all in one
-// transaction; false when the job already had a result (a duplicate ack).
+// SetResult stores the host's result once and, for a run_p, saves the session
+// the run ended on, in one transaction; false when the job already had a
+// result (a duplicate ack).
 func (s *Store) SetResult(id string, r proto.Result, now time.Time) (bool, error) {
 	b, _ := json.Marshal(r)
 	tx, err := s.db.Begin()
@@ -458,10 +452,6 @@ func (s *Store) SetResult(id string, r proto.Result, now time.Time) (bool, error
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
 		return false, nil
-	}
-	if _, err := tx.Exec(`INSERT OR REPLACE INTO done_ledger(event_id, job_id, host, status, done_at)
-		SELECT event_id, id, host, ?, ? FROM jobs WHERE id=?`, r.Status, ts(now), id); err != nil {
-		return false, err
 	}
 	var typ, target string
 	var gen int
@@ -495,16 +485,6 @@ func (s *Store) MarkDone(id string, now time.Time) error {
 func (s *Store) DropPayload(id string) error {
 	_, err := s.db.Exec(`UPDATE jobs SET payload='{}' WHERE id=? AND status=?`, id, JobDone)
 	return err
-}
-
-// DoneLedger reports whether an event's job finished, with its status.
-func (s *Store) DoneLedger(eventID string) (string, bool, error) {
-	var st string
-	err := s.db.QueryRow(`SELECT status FROM done_ledger WHERE event_id=?`, eventID).Scan(&st)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", false, nil
-	}
-	return st, err == nil, err
 }
 
 // ---- messages ----
@@ -676,22 +656,4 @@ func (s *Store) Get(key string) (string, error) {
 func (s *Store) Set(key, value string) error {
 	_, err := s.db.Exec(`INSERT INTO kv(key, value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value`, key, value)
 	return err
-}
-
-// Hosts lists every host with a row, sorted by name.
-func (s *Store) Hosts() ([]string, error) {
-	rows, err := s.db.Query(`SELECT name FROM hosts ORDER BY name`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []string
-	for rows.Next() {
-		var n string
-		if err := rows.Scan(&n); err != nil {
-			return nil, err
-		}
-		out = append(out, n)
-	}
-	return out, rows.Err()
 }

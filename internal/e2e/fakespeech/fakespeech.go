@@ -21,9 +21,6 @@ import (
 //go:embed reply.ogg
 var replyOgg []byte
 
-// ReplyOgg is the clip /v1/audio/speech answers with.
-func ReplyOgg() []byte { return append([]byte(nil), replyOgg...) }
-
 // Voices the fake lists at /v1/audio/voices.
 var Voices = []string{"af_heart", "af_bella", "am_adam", "bf_emma", "bm_george"}
 

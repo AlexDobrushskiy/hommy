@@ -152,8 +152,9 @@ func NewRelay(statePath, spoolDir, host string, now func() time.Time, emit func(
 }
 
 // telegramRe is the prefix every line typed from Telegram starts with
-// (internal/sanitize): `[Telegram · tg-<msgid> …]`.
-var telegramRe = regexp.MustCompile(`^\s*\[Telegram · tg-(\d+)[\] ·]`)
+// (internal/sanitize): `[Telegram · tg-<msgid> …]`; a pressed button or a reaction carries
+// `tg-<msgid>-b<seq>` / `-r<seq>` (internal/hub/agents.go).
+var telegramRe = regexp.MustCompile(`^\s*\[Telegram · tg-(\d+)(?:-[br]\d+)?[\] ·]`)
 
 // TelegramMsgID is the Telegram message id a prompt was typed from (0 = typed locally).
 func TelegramMsgID(prompt string) int64 {
@@ -307,7 +308,7 @@ func (r *Relay) handleLocked(req Request, in input, key string) error {
 		if in.LastAssistant != nil {
 			text = *in.LastAssistant
 		} else {
-			text = finalText(req.Agent, s.Transcript)
+			text = finalText(s.Transcript)
 		}
 		if err := r.resumeLocked(s); err != nil {
 			return err

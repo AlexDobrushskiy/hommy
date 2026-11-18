@@ -9,7 +9,7 @@
 #   - fake-only verbs (token, bot-url, url, calls, initdata, fault, reset) and flags (--chat; --from owner|other, and
 #     --from on anything but `read`, whose --from bot|me|any is the CLI's own filter) are refused.
 # Like the fake, `wait --for reply` starts after the newest message this tester has seen (a send, a `read messages`,
-# a reply wait), so a reply that lands before the wait starts is not missed: the id is kept in
+# the message a reply wait returned), so a reply that lands before the wait starts is not missed: the id is kept in
 # /tmp/hm-s<N>/run/tgreal.seen and passed as --since unless the call gives its own.
 set -euo pipefail
 HM_ME=tg-real
@@ -59,13 +59,96 @@ if [[ -r $seen_file ]]; then
   [[ ${seen_bot:-} == "$bot" && ${seen_id:-} =~ ^[0-9]+$ ]] && seen=$seen_id
 fi
 if [[ $verb == wait && -n $reply && -z $since ]] && ((seen > 0)); then set -- "$@" --since "$seen"; fi
+
+# The maintainer's account has one lock that every telegram-agent-cli on this Mac shares: a long wait would hold it
+# and starve other users (lock_busy). A reply wait therefore runs in slices of at most SLICE s, the lock released
+# between them, until one answers or the call's --timeout is used up (a timeout is exit 9, as one long wait gives).
+# Each slice starts after the same id (--since; with none given, the newest message before the first slice), so a
+# reply that lands between slices is still found. A slice refused with lock_busy (exit 6) is retried while time is
+# left. The other kinds (edit, reaction, pin, keyboard, draft) compare with the state at the wait's own start, which a
+# new slice would take again (missing a change made in the gap): they run as one wait.
+SLICE=${HOMMY_TG_SLICE:-30}
+# sliced_wait ARGS…: `e2e wait ARGS… --chat BOT` as above (no numeric --timeout: one call, the CLI's default)
+sliced_wait() {
+  local total='' rest=() kind='' anchored=0 t c o s0 left a
+  while (($#)); do
+    case $1 in
+      --timeout) total=${2:-}; shift 2 ;;
+      --timeout=*) total=${1#*=}; shift ;;
+      --for) kind=${2:-}; rest+=("$1" "${2:-}"); shift 2 || shift ;;
+      --for=*) kind=${1#*=}; rest+=("$1"); shift ;;
+      --since | --since=*) anchored=1; rest+=("$1"); shift ;;
+      *) rest+=("$1"); shift ;;
+    esac
+  done
+  if ! [[ $total =~ ^[0-9]+$ ]] || [[ $kind != reply ]] || ((total <= SLICE)); then
+    telegram-agent-cli e2e wait ${rest[@]+"${rest[@]}"} ${total:+--timeout "$total"} --chat "$bot"
+    return
+  fi
+  if ((!anchored)); then
+    a=$(telegram-agent-cli e2e read messages --limit 1 --chat "$bot" | jq -r '[.data.messages[]?.id? | numbers] | max // empty') || a=''
+    if ! [[ $a =~ ^[0-9]+$ ]]; then # no anchor: one wait, which anchors itself
+      telegram-agent-cli e2e wait ${rest[@]+"${rest[@]}"} --timeout "$total" --chat "$bot"
+      return
+    fi
+  fi
+  left=$total
+  while :; do
+    t=$((left < SLICE ? left : SLICE))
+    ((t > 0)) || t=1
+    c=0 s0=$SECONDS
+    # the CLI's own wait for the lock counts against the time left
+    o=$(TGAC_LOCK_WAIT=$left telegram-agent-cli e2e wait ${rest[@]+"${rest[@]}"} --timeout "$t" ${a:+--since "$a"} \
+      --chat "$bot") || c=$?
+    case $c in
+      9) left=$((left - (SECONDS - s0 > t ? SECONDS - s0 : t))) ;;
+      6) left=$((left - (SECONDS - s0 > 1 ? SECONDS - s0 : 1))); ((left > 0)) && sleep 1 && left=$((left - 1)) ;;
+      *) left=0 ;;
+    esac
+    if ((left <= 0)); then
+      printf '%s\n' "$o"
+      return "$c"
+    fi
+  done
+}
+
 code=0
-out=$(telegram-agent-cli e2e "$@" --chat "$bot") || code=$?
+if [[ $verb == wait ]]; then
+  shift
+  out=$(sliced_wait "$@") || code=$?
+elif [[ $verb == send ]] && [[ " $* " == *" --wait reply "* || " $* " == *" --wait=reply "* ]]; then
+  # `send … --wait reply`: the send, then a sliced reply wait after the sent message (the same JSON: sent + wait)
+  sargs=() wargs=(--for reply)
+  shift
+  while (($#)); do
+    case $1 in
+      --wait) shift 2 ;;
+      --wait=*) shift ;;
+      --timeout) wargs+=(--timeout "${2:-}"); shift 2 ;;
+      --timeout=*) wargs+=("$1"); shift ;;
+      *) sargs+=("$1"); shift ;;
+    esac
+  done
+  sent=$(telegram-agent-cli e2e send ${sargs[@]+"${sargs[@]}"} --chat "$bot") || code=$?
+  out=$sent
+  sid=$(jq -r '.data.sent.id // empty' <<<"$sent" 2>/dev/null) || sid=''
+  if ((code == 0)) && [[ $sid =~ ^[0-9]+$ ]]; then
+    w=$(sliced_wait "${wargs[@]}" --since "$sid") || code=$?
+    wj=$(jq -c '.data.wait // null' <<<"$w" 2>/dev/null) || wj=null
+    ej=$(jq -c '.error // null' <<<"$w" 2>/dev/null) || ej=null
+    out=$(jq -c --argjson w "${wj:-null}" --argjson e "${ej:-null}" \
+      '.data.wait = $w | if $e != null then .ok = false | .error = $e else . end' <<<"$sent")
+  fi
+else
+  out=$(telegram-agent-cli e2e "$@" --chat "$bot") || code=$?
+fi
 printf '%s\n' "$out"
 # The newest id the tester saw: what it sent, read, or got from a reply wait (the fake's rule).
 if ((code == 0)); then
+  # a reply wait counts only the message it returned: the CLI also lists every reply that landed meanwhile in
+  # .messages, and those are the next waits' answers
   id=$(jq -r '[.data.sent.id?, .data.messages[]?.id?,
-      (.data.wait | select(.for? == "reply") | .message.id?, .messages[]?.id?)] | map(numbers) | max // 0' \
+      (.data.wait | select(.for? == "reply") | .message.id? // ([.messages[]?.id?] | min))] | map(numbers) | max // 0' \
     <<<"$out" 2>/dev/null) || id=0
   if [[ $id =~ ^[0-9]+$ ]] && ((id > seen)); then
     mkdir -p "${seen_file%/*}"

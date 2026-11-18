@@ -1,4 +1,4 @@
-// Package hook is `hommy hook <event>`: the global Claude Code / Codex
+// Package hook is `hommy hook <event>`: the global Claude Code
 // hooks. Each run reads the hook's JSON from stdin, adds what only the
 // session's environment knows (agterm id, claude.ai bridge id) and hands it to
 // the local host's hookrelay over a unix socket. It never writes stdout, always
@@ -8,7 +8,6 @@
 package hook
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -34,11 +33,8 @@ const (
 	EventNotify           = "notify"
 )
 
-// Agents.
-const (
-	AgentClaude = "claude"
-	AgentCodex  = "codex"
-)
+// AgentClaude is the agent the hooks report for.
+const AgentClaude = "claude"
 
 // Events is every hook subcommand.
 var Events = []string{EventSessionStart, EventUserPromptSubmit, EventStop, EventNotify}
@@ -47,7 +43,7 @@ var Events = []string{EventSessionStart, EventUserPromptSubmit, EventStop, Event
 type Request struct {
 	Event    string          `json:"event"`
 	Agent    string          `json:"agent"`
-	Input    json.RawMessage `json:"input"` // the hook's stdin JSON as given (Codex notify: its argv JSON)
+	Input    json.RawMessage `json:"input"` // the hook's stdin JSON as given
 	AgtermID string          `json:"agterm_id,omitempty"`
 	BridgeID string          `json:"bridge_id,omitempty"`
 	At       time.Time       `json:"at"`
@@ -60,42 +56,8 @@ type Request struct {
 // Config is where the hook reports (the instance's host data dir and socket).
 type Config struct {
 	Socket string // HOOK_SOCKET: the host's hookrelay socket
-	Spool  string // HOOK_SPOOL: dir for requests the host couldn't take
-	Log    string // HOOK_LOG: one line per run
-	Mode   string // HOOK_MODE (informational)
-}
-
-// ConfigPath is a hook env file (tests and manual runs).
-func ConfigPath(home string) string { return filepath.Join(home, ".config/hommy/hook.env") }
-
-// LoadConfig reads the hook env file; ok is false when there is none (the
-// hooks are then no-ops).
-func LoadConfig(path string) (Config, bool) {
-	f, err := os.Open(path)
-	if err != nil {
-		return Config{}, false
-	}
-	defer f.Close()
-	var c Config
-	sc := bufio.NewScanner(f)
-	for sc.Scan() {
-		k, v, ok := strings.Cut(strings.TrimSpace(sc.Text()), "=")
-		if !ok || strings.HasPrefix(k, "#") {
-			continue
-		}
-		v = strings.Trim(strings.TrimSpace(v), `"'`)
-		switch strings.TrimSpace(k) {
-		case "HOOK_SOCKET":
-			c.Socket = v
-		case "HOOK_SPOOL":
-			c.Spool = v
-		case "HOOK_LOG":
-			c.Log = v
-		case "HOOK_MODE":
-			c.Mode = v
-		}
-	}
-	return c, c.Socket != ""
+	Spool  string // dir for requests the host couldn't take
+	Log    string // one line per run
 }
 
 // Timeout bounds a whole hook run (Claude Code waits for it before going on).
@@ -166,7 +128,7 @@ func Run(ctx context.Context, cfg Config, agent, event string, stdin io.Reader, 
 		if _, ok := fields["last_assistant_message"]; event == EventStop && !ok {
 			// Read the answer now: by the time a spooled Stop is replayed the
 			// transcript may hold a later turn.
-			fields["last_assistant_message"], _ = json.Marshal(finalText(agent, str("transcript_path")))
+			fields["last_assistant_message"], _ = json.Marshal(finalText(str("transcript_path")))
 			in, _ = json.Marshal(fields)
 		}
 	}

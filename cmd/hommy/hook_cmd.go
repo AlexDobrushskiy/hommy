@@ -10,7 +10,7 @@ import (
 	"github.com/AlexDobrushskiy/hommy/internal/hook"
 )
 
-// runHook is `hommy hook <event> [--agent claude|codex]`: a hook run never
+// runHook is `hommy hook <event>`: a hook run never
 // prints and always exits 0, soon. Where it reports comes from the instance's
 // config: HOOK_SOCKET, and <HOST_DATA_DIR>/hookspool and hook.log.
 func runHook(g globals, args []string, stdin io.Reader) int {
@@ -20,13 +20,6 @@ func runHook(g globals, args []string, stdin io.Reader) int {
 		return 0
 	}
 	event, agent := args[0], hook.AgentClaude
-	rest := args[1:]
-	for i := 0; i < len(rest); i++ {
-		if rest[i] == "--agent" && i+1 < len(rest) {
-			agent = rest[i+1]
-			i++
-		}
-	}
 	inst, err := config.FromEnv(g.instance)
 	if err != nil {
 		return 0
@@ -37,9 +30,6 @@ func runHook(g globals, args []string, stdin io.Reader) int {
 	}
 	data := c.GetPath("HOST_DATA_DIR")
 	cfg := hook.Config{Socket: c.GetPath("HOOK_SOCKET"), Spool: hook.SpoolDir(data), Log: hook.LogPath(data)}
-	if agent == hook.AgentCodex && event == hook.EventStop && len(rest) > 0 && rest[len(rest)-1] != agent {
-		stdin = stringsReader(rest[len(rest)-1]) // Codex's notify program gets its JSON as the last argument
-	}
 	start := time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), hook.Timeout)
 	defer cancel()

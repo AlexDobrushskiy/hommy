@@ -90,7 +90,13 @@ authorized writes to the test bot. It always passes `--chat` with the test bot f
 any call) when none is configured or a fake-only verb or flag (`--from`, `--chat`) is given. As with the fake,
 `wait --for reply` starts after the newest message you have seen (your last send, `read messages`, or reply wait;
 kept in `/tmp/hm-s<N>/run/tgreal.seen` and passed as `--since` unless you give one), so a separate wait does not miss
-a reply that landed before it started. `scripts/tg.sh` never reaches real Telegram (with `TG=real` it exits 2 and points
+a reply that landed before it started. The account's one lock is shared with every `telegram-agent-cli` user on the Mac, so a
+`wait --for reply` (and the wait of `send … --wait reply`, which is a send plus such a wait after the sent message)
+runs in slices of at most 30 s with the lock released between them, up to its `--timeout`; every slice starts after the
+same id (with no `--since` and nothing seen, the newest message before the first slice), and a slice refused with
+`lock_busy` is retried while time is left; a timeout is still exit 9. The other kinds (`edit`, `reaction`, `pin`,
+`keyboard`, `draft`) compare with the state at their own start, so they run as one wait holding the lock: keep their
+`--timeout` short. `scripts/tg.sh` never reaches real Telegram (with `TG=real` it exits 2 and points
 here), so fake rows run without prompts.
 
 ## Speech
@@ -470,3 +476,61 @@ The one-liner's shape on a terminal (review r1 check; one VM): move `/etc/sudoer
 (sudo then wants the password, as on a real Mac), then drive `scripts/vm.sh ssh NAME -tt -- /bin/zsh -lc 'cat
 artifacts/install.sh | bash -s -- --source artifacts --telegram-api http://127.0.0.1:4711 --no-pair-wait'` with
 `expect` answering `Password:` (`admin`) and Homebrew's `… any other key to abort` (RETURN).
+
+## Clean room
+
+Phase 06 (`docs/clean-room.md` records each run). One driver, `scripts/clean-room.sh` (`CR`), around the VM tools
+above; VM `hommy-06`, one at a time, ≥ 60 GB free. `T` = `scripts/tg-real.sh` (the real test bot: each call raises the
+owner's guard prompt, expect a short wait); `VM` = `scripts/vm.sh run hommy-06 --`. Run dirs:
+`.dev/clean-room/<run>/` (`current` = the newest): `run.env` (date, image digest, disk, version), `timings.tsv`
+(`stage<TAB>seconds`), `install-<tag>.txt` (each output line with its epoch), `nonuser.log`, `logs/` after `collect`.
+
+The install is the README's unattended form, `./install.sh --source artifacts --non-interactive --token-stdin`,
+with the real test bot's token (build Mac Keychain item `hommy-test-bot-token`) on stdin; it never appears in argv, a
+file or a log. Recorded non-user steps: `vm.sh`'s (ssh key, keychain unlock, Claude onboarding + test token env,
+agterm's two first-run answers; `.dev/vm/hommy-06/steps.log`), and `CR place` (the booking fixture + the place row;
+`nonuser.log`).
+
+```sh
+scripts/live-guard.sh snapshot
+df -g ~ | awk 'NR == 2 {print $4}'            # ≥ 60
+# E1 + E3: run in the background (it prints the code, then waits for the install to end)
+scripts/clean-room.sh run --until setup > .dev/cr.out 2>&1 &
+until grep -q '^pairing:' .dev/cr.out; do sleep 10; done; grep '^pairing:' .dev/cr.out   # the code K (~6–10 min)
+scripts/tg-real.sh send text "/start K" --wait reply --timeout 60    # E3: `✅ Paired…`
+wait; cat .dev/cr.out                         # `install exit: 0`, `timings: …`, `total: N s`
+cat .dev/clean-room/current/timings.tsv
+VM hommy pair --status                        # E3: paired
+VM hommy doctor; echo "exit $?"               # E2
+
+# E4
+scripts/clean-room.sh place "Barbearia Exemplo"   # prints the place row and `fixture log: ~/.hommy-vm/booking/log.jsonl`
+scripts/tg-real.sh send voice e2e/fixtures/audio/book-haircut.ogg
+scripts/tg-real.sh wait --for reply --timeout 600   # repeat until the message with inline buttons Book / Cancel:
+                                                    # 🎤 transcript, 🆕 session line, then the question
+scripts/tg-real.sh press --msg <its id> --button Book --wait edit
+scripts/tg-real.sh wait --for reply --timeout 600   # the text answer; once more: the voice note ("media":{"type":"voice"…})
+VM zsh -c 'cat ~/.local/share/hommy/briefs/*/brief.md'   # the 🆕 line's 📁 brief: the voice note's transcript
+VM cat .hommy-vm/booking/log.jsonl | jq -c 'select(.method == "POST")'
+VM zsh -c 'tail -n 3 "$(hommy config get VAULT_DIR)/log.md"'
+VM .local/share/hommy-browsers/browser-reaper --json
+
+# E6–E8 (same VM)
+scripts/clean-room.sh rerun                   # E6: `install: 0 changes`; services `unchanged (N jobs)`
+scripts/clean-room.sh rerun --with-whatsapp --with-telegram-user   # E7: `[8/9] optional: wacli installed, …`
+VM hommy doctor                               # E7: whatsapp + telegram-user ✓
+scripts/clean-room.sh upgrade                 # E8: stage 6 `upgraded`, version before/after, `kept` lines (= unchanged),
+                                              # services label pid runs before → after (hub, host: runs +1), host name H
+VM hommy version; VM hommy doctor
+scripts/tg-real.sh send text "/target vault@H" --wait reply --timeout 60
+scripts/tg-real.sh send text "Reply with ok" --wait reply --timeout 300
+scripts/clean-room.sh down                    # logs/ (token matches 0), VM deleted, disk after
+
+# E5: the whole flow again from a fresh VM, no step by hand (pairing, doctor, place, errand and its checks inside)
+scripts/clean-room.sh run > .dev/cr5.out 2>&1; cat .dev/cr5.out
+scripts/clean-room.sh down
+
+# E10
+.dev/tools/tart list                          # no hommy-* VM, the cached image only
+scripts/live-guard.sh check
+```

@@ -87,6 +87,7 @@ type runner struct {
 	// what the daemons read at start: the config file as it was, and whether a secret changed
 	cfgBefore      []byte
 	secretsChanged bool
+	servicesDone   bool
 	changes        int // files, secrets, services, plugins this run changed (`setup: N changes`)
 }
 
@@ -126,11 +127,37 @@ func Run(ctx context.Context, e Env, o Options) error {
 		if join && !s.join {
 			continue
 		}
-		if err := s.fn(ctx); err != nil {
+		err := s.fn(ctx)
+		r.stepEnded()
+		if err != nil {
 			return fmt.Errorf("%s: %w", s.name, err)
 		}
 	}
 	return r.finish(ctx)
+}
+
+// restartMark is left by a run that changed what hub and host read at start (the config, a secret) and ended
+// before `services` restarted them; the next run restarts them even if it changes nothing itself.
+func (r *runner) restartMark() string {
+	return filepath.Join(r.Cfg.Inst.StateDir(), "setup-restart-pending")
+}
+
+// stepEnded runs after every step, failed or not: until `services` has run, a changed input leaves the mark.
+func (r *runner) stepEnded() {
+	if r.servicesDone {
+		return
+	}
+	now, _ := os.ReadFile(r.Cfg.Path)
+	if !r.secretsChanged && string(now) == string(r.cfgBefore) {
+		return
+	}
+	err := os.MkdirAll(filepath.Dir(r.restartMark()), 0o700)
+	if err == nil {
+		err = os.WriteFile(r.restartMark(), nil, 0o600)
+	}
+	if err != nil {
+		r.say("! %v: if this run stops before services, run `hommy service restart hub` and `host` afterwards", err)
+	}
 }
 
 func (r *runner) say(format string, a ...any) { fmt.Fprintf(r.Out, format+"\n", a...) }
@@ -369,11 +396,15 @@ func (r *runner) token(ctx context.Context) error {
 		}
 		return err
 	}
+	r.botName = name
+	if cur, err := r.Store.Get(secret.TelegramToken); err == nil && cur == tok {
+		r.say("✓ bot @%s (token kept)", name) // a re-run with the same token changes nothing (I5)
+		return nil
+	}
 	if err := r.Store.Set(secret.TelegramToken, tok); err != nil {
 		return err
 	}
 	r.secretsChanged = true
-	r.botName = name
 	r.say("✓ bot @%s", name)
 	return nil
 }
@@ -659,11 +690,21 @@ func (r *runner) services(ctx context.Context) error {
 	if r.secretsChanged {
 		r.changes++
 	}
-	n, err := r.Install(r.secretsChanged || cfgChanged, names...)
+	_, err := os.Stat(r.restartMark())
+	pending := err == nil
+	if pending && !r.secretsChanged && !cfgChanged {
+		r.changes++
+		r.say("restarting hub and host: an earlier run changed their settings and stopped before restarting them")
+	}
+	n, err := r.Install(r.secretsChanged || cfgChanged || pending, names...)
 	if err != nil {
 		return err
 	}
 	r.changes += n
+	r.servicesDone = true
+	if err := os.Remove(r.restartMark()); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
 	if r.Ready != nil {
 		if err := r.Ready(ctx, r.o.Join == ""); err != nil {
 			r.say("services: %v", err)

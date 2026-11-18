@@ -47,7 +47,13 @@ main() {
       --with-telegram-user) WITH_TG_USER=1; shift ;;
       --with-captcha) WITH_CAPTCHA=1; shift ;;
       -h | --help) usage ;;
-      --*=*) SETUP_ARGS+=("$1"); shift ;; # a setup no-value flag with an explicit value
+      --*=*) # a setup no-value flag with an explicit value; its true forms (Go's flag package) act like the bare flag
+        case ${1#*=} in
+          1 | t | T | true | TRUE | True)
+            [[ ${1%%=*} == --non-interactive ]] && NON_INTERACTIVE=1
+            [[ ${1%%=*} == --token-stdin ]] && TOKEN_STDIN=1 ;;
+        esac
+        SETUP_ARGS+=("$1"); shift ;;
       --*)
         [[ $1 == --non-interactive ]] && NON_INTERACTIVE=1
         [[ $1 == --token-stdin ]] && TOKEN_STDIN=1
@@ -70,6 +76,10 @@ main() {
     HOMMY_BINARY=$(cd "$(dirname "$HOMMY_BINARY")" && pwd -P)/$(basename "$HOMMY_BINARY")
   fi
   ((BREW_CHECK_ONLY == 0)) || [[ -n $HOMMY_BINARY ]] || { echo "install: --brew-check-only needs --hommy-binary" >&2; exit 2; }
+
+  # --token-stdin: the token is setup's alone. Every earlier stage runs with stdin from /dev/null (an installer child
+  # that reads stdin would swallow it); setup reads it back from fd 3.
+  if ((TOKEN_STDIN)); then exec 3<&0 </dev/null; fi
 
   REPO=AlexDobrushskiy/hommy
   BROWSERS_REPO=https://github.com/AlexDobrushskiy/hommy-browsers.git
@@ -240,14 +250,16 @@ main() {
   fi
 
   # --- 6. hommy ---
-  version_of() { "$1" version 2>/dev/null | awk '{print $2}'; }
+  version_of() { { "$1" version 2>/dev/null || true; } | awk '{print $2}'; }
   SIGNED=$HOME/.local/share/$BASE/bin/hommy
   # local_tap: the generated cask from DIR/dist/, pointing at the local archive (before the public tap exists)
   local_tap() {
-    local tapdir cask archive
+    local tapdir cask archive v
     [[ -f $SOURCE/dist/hommy.rb ]] || fail "$SOURCE/dist/hommy.rb missing (scripts/vm-artifacts.sh builds it)" 6
-    archive=$(find "$SOURCE/dist" -maxdepth 1 -name 'hommy_*_darwin_arm64.tar.gz' | head -1)
-    [[ -n $archive ]] || fail "no darwin/arm64 archive in $SOURCE/dist" 6
+    # the archive of the cask's own version (an older snapshot may sit beside it)
+    v=$(sed -nE 's/^[[:space:]]*version "([^"]+)".*/\1/p' "$SOURCE/dist/hommy.rb" | head -n 1)
+    archive=$SOURCE/dist/hommy_${v}_darwin_arm64.tar.gz
+    [[ -n $v && -f $archive ]] || fail "no darwin/arm64 archive for version ${v:-?} in $SOURCE/dist" 6
     tapdir=$("$BREW" --repository)/Library/Taps/hommy-local/homebrew-tap
     if [[ ! -d $tapdir ]]; then
       "$BREW" tap-new hommy-local/tap --no-git >/dev/null || fail "brew tap-new hommy-local/tap failed" 6
@@ -287,7 +299,8 @@ main() {
     if ! "$BREW" list --cask hommy >/dev/null 2>&1; then
       run 6 "$SRC_DESC" "$BREW" install --cask "$TAP_CASK"
       stage 6 hommy installed "$(version_of "$BREW_PREFIX/bin/hommy") from $SRC_DESC"
-    elif "$BREW" outdated --cask --greedy hommy 2>/dev/null | grep -q hommy; then
+    # brew outdated exits 1 when something is outdated: read its output, not its status
+    elif { "$BREW" outdated --cask --greedy hommy 2>/dev/null || true; } | grep -q hommy; then
       old=$(version_of "$BREW_PREFIX/bin/hommy")
       run 6 "$SRC_DESC" "$BREW" upgrade --cask "$TAP_CASK"
       stage 6 hommy upgraded "$old → $(version_of "$BREW_PREFIX/bin/hommy")"
@@ -359,7 +372,9 @@ main() {
   optional "$WITH_WHATSAPP" shfmt brew shfmt "Homebrew (homebrew/core)"
   optional "$WITH_TG_USER" telegram-agent-cli cask AlexDobrushskiy/tap/telegram-agent-cli "Homebrew cask (AlexDobrushskiy/tap)"
   if ((${#opt[@]})); then
-    printf '[8/9] optional: %s\n' "$(IFS=', '; echo "${opt[*]}")"
+    local list=${opt[0]} o
+    for o in "${opt[@]:1}"; do list+=", $o"; done
+    printf '[8/9] optional: %s\n' "$list"
   else
     printf '[8/9] optional: skipped (--with-whatsapp, --with-telegram-user)\n'
   fi
@@ -372,7 +387,10 @@ main() {
   setup+=("${SETUP_ARGS[@]+"${SETUP_ARGS[@]}"}")
   out=$(mktemp)
   rc=0
-  if ((NON_INTERACTIVE || TOKEN_STDIN)) || ! { : </dev/tty; } 2>/dev/null; then
+  if ((TOKEN_STDIN)); then
+    "${setup[@]}" <&3 2>&1 | tee "$out" || rc=${PIPESTATUS[0]}
+    exec 3<&-
+  elif ((NON_INTERACTIVE)) || ! { : </dev/tty; } 2>/dev/null; then
     "${setup[@]}" 2>&1 | tee "$out" || rc=${PIPESTATUS[0]}
   else
     "${setup[@]}" </dev/tty 2>&1 | tee "$out" || rc=${PIPESTATUS[0]}

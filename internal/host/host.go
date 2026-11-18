@@ -58,7 +58,6 @@ type Host struct {
 }
 
 type inflightJob struct {
-	jobID    string
 	started  bool         // a "started" event was emitted; re-sent when the job is re-pushed
 	progress *proto.Event // the newest progress snapshot; re-sent when the job is re-pushed
 	cancel   context.CancelCauseFunc
@@ -325,7 +324,7 @@ func (h *Host) receive(ctx context.Context, job proto.Job) {
 		return
 	}
 	jctx, cancel := context.WithCancelCause(ctx)
-	in := &inflightJob{jobID: job.ID, cancel: cancel}
+	in := &inflightJob{cancel: cancel}
 	if _, ok := h.cancelled[job.EventID]; ok {
 		cancel(errStopped)
 	}

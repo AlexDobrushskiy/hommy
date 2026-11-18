@@ -40,13 +40,6 @@ func (realClock) Sleep(d time.Duration) { time.Sleep(d) }
 // RealClock is the wall clock.
 var RealClock Clock = realClock{}
 
-// ErrBlocked: nothing was typed; the composer was not ready.
-type ErrBlocked struct{ State Composer }
-
-func (e *ErrBlocked) Error() string {
-	return fmt.Sprintf("composer is %s (%s); nothing was typed", e.State.State, e.State.Reason)
-}
-
 // ErrDirty: a body write started but could not be verified; Return was withheld.
 type ErrDirty struct {
 	Msg     string

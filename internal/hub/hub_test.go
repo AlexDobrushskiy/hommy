@@ -157,8 +157,10 @@ func TestDuplicateResultDeliveredOnce(t *testing.T) {
 	if n := count(r.tg.snapshot(), "send", "answer to [dup]"); n != 1 {
 		t.Errorf("delivered %d times", n)
 	}
-	if st, ok, _ := r.st.DoneLedger(j.EventID); !ok || st != proto.StatusOK {
-		t.Errorf("done ledger: %q %v", st, ok)
+	done, _ := r.st.Job(j.ID)
+	var stored proto.Result
+	if err := json.Unmarshal([]byte(done.Result), &stored); err != nil || stored.JobID != j.ID || stored.Status != proto.StatusOK {
+		t.Errorf("stored result: %q %v", done.Result, err)
 	}
 }
 

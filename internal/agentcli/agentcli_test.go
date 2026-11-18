@@ -141,13 +141,6 @@ func TestSendPlainLikeSendPy(t *testing.T) {
 		c.errb.String() != "error: TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing in "+filepath.Join(c.dir, "bad.env")+"\n" {
 		t.Errorf("missing keys: %q", c.errb.String())
 	}
-	// TELEGRAM_ENV_FROM another env file (its OWNER_CHAT_ID is the chat)
-	botEnv := filepath.Join(c.dir, "bot.env")
-	os.WriteFile(botEnv, []byte("TELEGRAM_BOT_TOKEN=123:tok\nOWNER_CHAT_ID=1001\nCLAUDE_BIN=x\n"), 0o600)
-	os.WriteFile(filepath.Join(c.dir, "from.env"), []byte("TELEGRAM_ENV_FROM="+botEnv+"\nTELEGRAM_API_URL="+c.botURL+"\n"), 0o600)
-	if code := c.send("--env-file", filepath.Join(c.dir, "from.env"), "via env-from"); code != 0 || !strings.HasPrefix(c.out.String(), "sent message_id=") {
-		t.Errorf("TELEGRAM_ENV_FROM: %d %q %q", code, c.out.String(), c.errb.String())
-	}
 	c.bot.fail = "Bad Request: chat not found"
 	if code := c.send("--env-file", cfg, "x"); code != 1 || c.errb.String() != "error: HTTP 400: Bad Request: chat not found\n" {
 		t.Errorf("api error: %q", c.errb.String())

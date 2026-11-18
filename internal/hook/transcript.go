@@ -13,16 +13,12 @@ import (
 // finalText reads a turn's final assistant text from the session transcript,
 // for hook inputs without last_assistant_message. The transcript may lag the
 // Stop hook by a moment, so an empty read is retried briefly.
-func finalText(agent, path string) string {
+func finalText(path string) string {
 	if path == "" {
 		return ""
 	}
-	read := claudeFinalText
-	if agent == AgentCodex {
-		read = codexFinalText
-	}
 	for i := 0; ; i++ {
-		if t := read(path); t != "" || i == 5 {
+		if t := claudeFinalText(path); t != "" || i == 5 {
 			return t
 		}
 		time.Sleep(200 * time.Millisecond)
@@ -128,43 +124,4 @@ func isPrompt(content json.RawMessage) bool {
 		}
 	}
 	return len(blocks) > 0
-}
-
-// codexFinalText: the last agent message in a Codex rollout file.
-func codexFinalText(path string) string {
-	last := ""
-	for _, line := range tailLines(path, 4<<20) {
-		var e struct {
-			Type    string `json:"type"`
-			Payload struct {
-				Type    string `json:"type"`
-				Message string `json:"message"`
-				Role    string `json:"role"`
-				Content []struct {
-					Type string `json:"type"`
-					Text string `json:"text"`
-				} `json:"content"`
-			} `json:"payload"`
-		}
-		if json.Unmarshal(line, &e) != nil {
-			continue
-		}
-		switch {
-		case e.Type == "event_msg" && e.Payload.Type == "user_message":
-			last = ""
-		case e.Type == "event_msg" && e.Payload.Type == "agent_message" && strings.TrimSpace(e.Payload.Message) != "":
-			last = e.Payload.Message
-		case e.Type == "response_item" && e.Payload.Type == "message" && e.Payload.Role == "assistant":
-			var t []string
-			for _, c := range e.Payload.Content {
-				if c.Type == "output_text" && c.Text != "" {
-					t = append(t, c.Text)
-				}
-			}
-			if len(t) > 0 {
-				last = strings.Join(t, "\n")
-			}
-		}
-	}
-	return strings.TrimSpace(last)
 }

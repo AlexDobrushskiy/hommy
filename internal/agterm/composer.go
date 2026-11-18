@@ -325,12 +325,8 @@ func composerRowReadings(rows []string, index int, tolerant bool) []rowReading {
 	return readings
 }
 
-// RowMatches compares one screen row with source text of the same length; with
-// tolerant a braille particle stands for the one cell it covers.
-func RowMatches(expected, row string, tolerant bool) bool {
-	return rowMatchesRunes([]rune(expected), []rune(row), tolerant)
-}
-
+// rowMatchesRunes compares one screen row with source text of the same length;
+// with tolerant a braille particle stands for the one cell it covers.
 func rowMatchesRunes(expected, row []rune, tolerant bool) bool {
 	if len(expected) != len(row) {
 		return false

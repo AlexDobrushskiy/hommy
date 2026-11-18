@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/AlexDobrushskiy/hommy/internal/sanitize"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,6 +82,10 @@ func TestTelegramMsgID(t *testing.T) {
 		"run it":                                          0,
 		"note [Telegram · tg-5] inside":                   0,
 		"[Telegram · tg-12x] no":                          0,
+		// the hub's ids for a pressed button and a reaction (internal/hub/agents.go): turns from Telegram too
+		sanitize.PrefixID("tg-38-b5", "🤖 booking: 10:30?") + "Book": 38,
+		sanitize.PrefixID("tg-41-r7", "") + "👍 yes / continue":      41,
+		"[Telegram · tg-38-bx] no":                                  0,
 	} {
 		if got := TelegramMsgID(in); got != want {
 			t.Errorf("TelegramMsgID(%q) = %d, want %d", in, got, want)
@@ -168,18 +173,17 @@ func TestRelayTurnSurvivesRestartAndExpires(t *testing.T) {
 }
 
 func TestRelayTypedSessionBeatsHookEnv(t *testing.T) {
-	// A Codex TUI on Codex's shared daemon: its hooks carry the daemon's stale
-	// AGTERM_SESSION_ID. The host knows where it typed tg-31.
+	// The hooks carry a stale AGTERM_SESSION_ID; the host knows where it typed tg-31.
 	rr := newRelayRig(t)
 	rr.r.NoteTyped(31, "c0dec0de-aaaa")
-	rr.must(AgentCodex, EventUserPromptSubmit, "STALE-ID", "", map[string]any{"session_id": "t1", "turn_id": "u1", "prompt": "[Telegram · tg-31] hi"})
-	rr.must(AgentCodex, EventNotify, "STALE-ID", "", map[string]any{"session_id": "t1", "tool_name": "Bash",
+	rr.must(AgentClaude, EventUserPromptSubmit, "STALE-ID", "", map[string]any{"session_id": "t1", "prompt_id": "u1", "prompt": "[Telegram · tg-31] hi"})
+	rr.must(AgentClaude, EventNotify, "STALE-ID", "", map[string]any{"session_id": "t1", "tool_name": "Bash",
 		"tool_input": map[string]any{"command": "touch x"}})
-	rr.must(AgentCodex, EventStop, "STALE-ID", "", map[string]any{"session_id": "t1", "turn_id": "u1", "last_assistant_message": "ok"})
+	rr.must(AgentClaude, EventStop, "STALE-ID", "", map[string]any{"session_id": "t1", "prompt_id": "u1", "last_assistant_message": "ok"})
 	// The prompt hook ran before the host noted the line (it types first).
-	rr.must(AgentCodex, EventUserPromptSubmit, "STALE-ID", "", map[string]any{"session_id": "t1", "prompt": "[Telegram · tg-32] more"})
+	rr.must(AgentClaude, EventUserPromptSubmit, "STALE-ID", "", map[string]any{"session_id": "t1", "prompt": "[Telegram · tg-32] more"})
 	rr.r.NoteTyped(32, "c0dec0de-aaaa")
-	rr.must(AgentCodex, EventStop, "STALE-ID", "", map[string]any{"session_id": "t1", "last_assistant_message": "ok2"})
+	rr.must(AgentClaude, EventStop, "STALE-ID", "", map[string]any{"session_id": "t1", "last_assistant_message": "ok2"})
 	got := rr.emitted()
 	if len(got) != 4 {
 		t.Fatalf("emitted %+v", got)
@@ -188,7 +192,7 @@ func TestRelayTypedSessionBeatsHookEnv(t *testing.T) {
 		t.Fatalf("permission text = %q", got[0].A.Text)
 	}
 	for _, e := range got {
-		if e.A.AgtermID != "C0DEC0DE-AAAA" || e.A.Agent != AgentCodex {
+		if e.A.AgtermID != "C0DEC0DE-AAAA" || e.A.Agent != AgentClaude {
 			t.Fatalf("emitted %+v, want agterm C0DEC0DE-AAAA", e.A)
 		}
 	}
@@ -213,17 +217,6 @@ func TestRelayReadsTranscriptWithoutLastAssistantMessage(t *testing.T) {
 	rr.must(AgentClaude, EventStop, agID, "", map[string]any{"session_id": "s1", "transcript_path": tr})
 	if got := rr.emitted(); len(got) != 1 || got[0].A.Text != "final part one\n\nfinal part two" {
 		t.Fatalf("emitted %+v", got)
-	}
-}
-
-func TestCodexFinalText(t *testing.T) {
-	p := filepath.Join(t.TempDir(), "rollout.jsonl")
-	os.WriteFile(p, []byte(`{"type":"event_msg","payload":{"type":"user_message","message":"q"}}
-{"type":"event_msg","payload":{"type":"agent_message","message":"thinking aloud"}}
-{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"the answer"}]}}
-`), 0o600)
-	if got := codexFinalText(p); got != "the answer" {
-		t.Fatalf("codexFinalText = %q", got)
 	}
 }
 

@@ -20,8 +20,7 @@ import (
 
 // Engine defaults (the default instance uses them as they are).
 const (
-	DefaultPortBase  = 8931
-	DefaultDebugBase = 9331
+	DefaultPortBase = 8931
 )
 
 // NodeCandidates are where Homebrew's node lives (stable path first): the

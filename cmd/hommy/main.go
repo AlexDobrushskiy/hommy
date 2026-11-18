@@ -51,8 +51,6 @@ var (
 	getenv = os.Getenv
 )
 
-func stringsReader(s string) io.Reader { return strings.NewReader(s) }
-
 // splitGlobals takes --instance/--config (either form, anywhere before `--`)
 // out of args.
 func splitGlobals(args []string) (globals, []string, error) {

@@ -13,9 +13,9 @@ import (
 // Config is where messages go: the instance's config and Keychain (Instance),
 // or an env file given with --env-file / $HOMMY_SEND_ENV:
 //
-//	TELEGRAM_BOT_TOKEN or TELEGRAM_TOKEN_FILE, TELEGRAM_CHAT_ID  — direct Bot API (always needed: the fallback)
-//	HUB_URL, HOST_NAME, HOST_KEY_FILE                            — send through the hub (a host's env file has them)
-//	SPOOL_DIR                                                    — default ~/.local/state/hommy/spool
+//	TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID  — direct Bot API (always needed: the fallback)
+//	HUB_URL, HOST_NAME, HOST_KEY_FILE     — send through the hub (a host's env file has them)
+//	SPOOL_DIR                             — default ~/.local/state/hommy/spool
 type Config struct {
 	Path     string
 	Token    string
@@ -90,28 +90,8 @@ func LoadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("%s", errnoText(err))
 	}
-	// TELEGRAM_ENV_FROM: take the keys from another env file.
-	if from := env["TELEGRAM_ENV_FROM"]; from != "" {
-		other, err := parseEnv(expand(from))
-		if err != nil {
-			return Config{}, fmt.Errorf("TELEGRAM_ENV_FROM: %s", errnoText(err))
-		}
-		if env["TELEGRAM_BOT_TOKEN"] == "" {
-			env["TELEGRAM_BOT_TOKEN"] = other["TELEGRAM_BOT_TOKEN"]
-		}
-		if env["TELEGRAM_CHAT_ID"] == "" {
-			env["TELEGRAM_CHAT_ID"] = firstSet(other["TELEGRAM_CHAT_ID"], other["OWNER_CHAT_ID"])
-		}
-	}
 	c := Config{Path: path, Token: env["TELEGRAM_BOT_TOKEN"], HubURL: env["HUB_URL"], HostName: env["HOST_NAME"],
 		SpoolDir: expand(env["SPOOL_DIR"]), BotAPI: strings.TrimSuffix(env["TELEGRAM_API_URL"], "/")}
-	if c.Token == "" && env["TELEGRAM_TOKEN_FILE"] != "" {
-		b, err := os.ReadFile(expand(env["TELEGRAM_TOKEN_FILE"]))
-		if err != nil {
-			return Config{}, fmt.Errorf("TELEGRAM_TOKEN_FILE: %s", errnoText(err))
-		}
-		c.Token = strings.TrimSpace(string(b))
-	}
 	chat := env["TELEGRAM_CHAT_ID"]
 	if c.Token == "" || chat == "" {
 		return Config{}, fmt.Errorf("TELEGRAM_BOT_TOKEN / TELEGRAM_CHAT_ID missing in %s", path)
@@ -139,15 +119,6 @@ func LoadConfig(path string) (Config, error) {
 		}
 	}
 	return c, nil
-}
-
-func firstSet(vs ...string) string {
-	for _, v := range vs {
-		if v != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // BotID is the bot the token belongs to (its numeric prefix; 0 if unreadable).
