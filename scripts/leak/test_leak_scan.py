@@ -317,6 +317,25 @@ class Repo(unittest.TestCase):
         finally:
             ls.MAX_BLOB = old
 
+    def test_explicit_path_with_nothing_to_scan(self):
+        self.write("docs/a.md", "clean\n")
+        os.makedirs(os.path.join(self.repo, "empty"))
+        self.write(".gitignore", "ignored/\n")
+        self.write("ignored/a.md", "x\n")
+        for p in ("nope", os.path.join(self.dir, "does-not-exist"), "empty", "ignored"):
+            rc, out, err = self.scan(p)
+            self.assertEqual(rc, 2, p)
+            self.assertIn("nothing to scan: " + p, err)
+            self.assertNotIn("leak scan:", out)
+        rc, out, err = self.scan("docs", "nope")  # one good path does not cover a wrong one
+        self.assertEqual(rc, 2)
+        self.assertIn("nothing to scan: nope", err)
+        rc, out, _ = self.scan("docs")
+        self.assertEqual(rc, 0)
+        self.assertIn("leak scan: 1 files", out)
+        rc, out, _ = self.scan()  # no argument: the work tree, as before
+        self.assertEqual(rc, 0)
+
     def test_required_without_list(self):
         missing = os.path.join(self.dir, "nope.txt")
         rc, out, err = self.scan("--list", missing, ".", lst=False)

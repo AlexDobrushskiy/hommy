@@ -37,4 +37,8 @@ if [[ -z $bot && -r $cfg ]]; then bot=$(head -n 1 "$cfg" | tr -d '[:space:]'); f
 [[ -n $bot ]] || usage_json "no test bot configured (HOMMY_TEST_BOT or $cfg; docs/testing.md §12)"
 [[ $bot == @* ]] || bot=@$bot
 [[ $bot =~ ^@hommy_test_[a-z0-9]{6}_bot$ ]] || usage_json "test bot must be @hommy_test_<6 chars>_bot; refusing"
+# `send voice|photo|file FILE` (scripts/tg.sh's form): the CLI takes the file as --path.
+if [[ $verb == send && ${2:-} =~ ^(voice|photo|file)$ && -n ${3:-} && ${3:-} != -* ]]; then
+  set -- "$1" "$2" --path "$3" "${@:4}"
+fi
 exec telegram-agent-cli e2e "$@" --chat "$bot"

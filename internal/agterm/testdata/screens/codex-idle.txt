@@ -1,0 +1,60 @@
+╭─────────────────────────────────────────────────╮
+│ ✨ Update available! 0.165.0 -> 0.166.0         │
+│ Run npm install -g @openai/codex to update.     │
+│                                                 │
+│ See full release notes:                         │
+│ https://github.com/openai/codex/releases/latest │
+╰─────────────────────────────────────────────────╯
+
+
+  >_ OpenAI Codex (v0.165.0)
+     ~/hc-e2e-scratch
+
+
+› run sleep 20 in the shell, then say done
+
+
+• I’ll run sleep 20 in the shell, then report back.
+
+• Ran sleep 20
+  └ (no output)
+
+• done
+
+  Worked for 27s • 19:02
+
+
+› [Telegram · tg-9002] reply with the word pong
+
+
+• pong
+
+  Worked for 2s • 19:14
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+› Ask Codex to do anything
+
+  GPT-6-Astra · high · hc-e2e-scratch · Context 99% left · weekly 69% left · Fast off
+  ← for agents · ? for shortcuts

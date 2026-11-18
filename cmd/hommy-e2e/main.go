@@ -25,7 +25,7 @@ import (
 )
 
 const usageText = `usage:
-  hommy-e2e faketg --addr HOST:PORT (--token-file F | --token T)
+  hommy-e2e faketg --addr HOST:PORT (--token-file F | --token T) [--state-file F]
   hommy-e2e fakespeech --addr HOST:PORT [--fixtures DIR]
   hommy-e2e static-site --addr HOST:PORT [--dir DIR]
   hommy-e2e booking-site (--port P | --addr HOST:PORT) [--log FILE] [--today YYYY-MM-DD]
@@ -79,6 +79,7 @@ func handler(cmd string, args []string, stderr io.Writer) (http.Handler, string,
 	addr := fs.String("addr", "", "listen address, e.g. 127.0.0.1:4711")
 	token := fs.String("token", "", "faketg: the bot token to accept")
 	tokenFile := fs.String("token-file", "", "faketg: a file holding the bot token")
+	stateFile := fs.String("state-file", "", "faketg: keeps the id counters across restarts")
 	fixtures := fs.String("fixtures", "e2e/fixtures/audio", "fakespeech: fixture audio with .txt transcripts")
 	dir := fs.String("dir", "e2e/fixtures/static", "static-site: the directory to serve")
 	port := fs.Int("port", 0, "booking-site: listen on 127.0.0.1:PORT")
@@ -106,7 +107,7 @@ func handler(cmd string, args []string, stderr io.Writer) (http.Handler, string,
 		if tok == "" {
 			return nil, "", errors.New("a token is required (--token-file or --token)")
 		}
-		return faketg.New(faketg.Options{Token: tok}), *addr, nil
+		return faketg.New(faketg.Options{Token: tok, StateFile: *stateFile}), *addr, nil
 	case "fakespeech":
 		s, err := fakespeech.New(fakespeech.Options{FixturesDir: *fixtures})
 		if err != nil {

@@ -209,6 +209,9 @@ func (w *watch) wait(ctx context.Context) (*waitResult, *cliError) {
 	for {
 		w.s.mu.Lock()
 		r, done := w.check()
+		if done && w.spec.kind == "reply" && r.Message != nil && r.Message.ID > w.c.seen {
+			w.c.seen = r.Message.ID
+		}
 		ch := w.s.changed
 		now := w.s.now()
 		w.s.mu.Unlock()

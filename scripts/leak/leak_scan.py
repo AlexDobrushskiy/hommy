@@ -17,7 +17,8 @@ Options:
 Output: `path:line: leak #N (category)`, `blob|commit <sha12>: path name: leak #N`, `commit|tag <sha12>: message: leak #N`,
 `commit <sha12>: <author|committer> email not allowed`, `path: image not reviewed`; never the matched text. #N is the
 line number in the list. Last line: `leak scan: <files> files, <commits> commits, <hits> hits (identifiers: <n> |
-skipped)`. Exit 0 clean, 1 hit, 2 no list where one is required / usage.
+skipped)`. Exit 0 clean, 1 hit, 2 no list where one is required / usage / an explicit path with no file to scan
+(`nothing to scan: <path>`).
 
 Matching: text and identifiers NFC-normalised and case-folded; a hit needs a boundary (the characters before and after
 are not Unicode letters or digits). Category `phone`: every phone-like run is reduced to digits and hits when it holds
@@ -282,9 +283,15 @@ def toplevel(path):
     return r.stdout.strip() if r.returncode == 0 else None
 
 
-def scan_paths(scan, paths):
-    for p in paths:
-        p = os.path.abspath(p)
+class NothingToScan(Exception):
+    pass
+
+
+def scan_paths(scan, paths, explicit=True):
+    """Explicit paths that resolve to no file raise NothingToScan (a wrong path must never pass as clean)."""
+    for given in paths:
+        before = scan.files
+        p = os.path.abspath(given)
         d = p if os.path.isdir(p) else os.path.dirname(p)
         top = toplevel(d)
         if top:
@@ -307,6 +314,8 @@ def scan_paths(scan, paths):
                     if os.path.isfile(f) and not os.path.islink(f):
                         with open(f, "rb") as fh:
                             scan.blob(os.path.relpath(f, scan.base), fh.read())
+        if explicit and scan.files == before:
+            raise NothingToScan(given)
 
 
 def scan_staged(scan, repo):
@@ -436,6 +445,7 @@ def main(argv):
     else:
         repo_arg = None
     paths = args if mode == "paths" else []
+    explicit = bool(paths)
     if mode == "paths" and not paths:
         paths = ["."]
     repo = toplevel(repo_arg) if repo_arg else toplevel(paths[0] if os.path.isdir(paths[0]) else
@@ -466,7 +476,7 @@ def main(argv):
     try:
         if mode == "paths":
             if check_text:
-                scan_paths(scan, paths)
+                scan_paths(scan, paths, explicit)
         elif mode == "--staged":
             if check_text:
                 scan_staged(scan, repo)
@@ -476,6 +486,9 @@ def main(argv):
                 scan_commits(scan, repo, revs, identities, check_ids, check_text)
         else:
             scan_commits(scan, repo, ["--all"], identities, check_ids, check_text)
+    except NothingToScan as e:
+        print(f"leak scan: nothing to scan: {e}", file=sys.stderr)
+        return 2
     except RuntimeError as e:
         print(f"leak scan: {e}", file=sys.stderr)
         return 2

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"math"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -66,6 +67,9 @@ type Options struct {
 	// Now and After are the clock (tests inject their own); defaults: time.Now, time.After.
 	Now   func() time.Time
 	After func(time.Duration) <-chan time.Time
+	// StateFile keeps the update and message id counters across restarts, so a
+	// restarted fake never reuses an id a running hub already stored ("" = off).
+	StateFile string
 }
 
 type reactionType struct {
@@ -116,6 +120,13 @@ type chat struct {
 	keyboard int // the message whose reply markup set the keyboard in effect
 	menu     json.RawMessage
 	action   string
+	// seen is the newest message the tester has seen through the control API
+	// (sent, read, or returned by a reply wait): a plain `wait --for reply`
+	// returns the next bot message after it, so a fast answer that lands
+	// between a send and the wait is not missed.
+	seen int
+	// onAdd records the id counters (Server.saveCounters).
+	onAdd func()
 }
 
 func (c *chat) find(id int) *message {
@@ -134,6 +145,9 @@ func (c *chat) add(m *message) *message {
 	c.nextID++
 	m.ID = c.nextID
 	c.msgs = append(c.msgs, m)
+	if c.onAdd != nil {
+		c.onAdd()
+	}
 	return m
 }
 
@@ -195,6 +209,7 @@ type Server struct {
 	watching   int // waits in progress (tests sync on it)
 	commands   json.RawMessage
 	menu       json.RawMessage
+	stateFile  string
 }
 
 // New returns a fake whose bot id is the token's numeric prefix (DefaultBotID when it has none).
@@ -218,9 +233,55 @@ func New(o Options) *Server {
 		{ID: OwnerID, FirstName: "Test", LastName: "Owner", Username: "test_owner", Lang: "en"},
 		{ID: OtherID, FirstName: "Other", LastName: "User", Username: "other_user", Lang: "en"},
 	} {
-		s.chats[u.ID] = &chat{user: u}
+		s.chats[u.ID] = &chat{user: u, onAdd: s.saveCounters}
 	}
+	s.stateFile = o.StateFile
+	s.loadCounters()
 	return s
+}
+
+type counters struct {
+	NextUpdate int64         `json:"next_update"`
+	NextIDs    map[int64]int `json:"next_ids"`
+}
+
+// loadCounters continues the id spaces of an earlier run (StateFile).
+func (s *Server) loadCounters() {
+	if s.stateFile == "" {
+		return
+	}
+	b, err := os.ReadFile(s.stateFile)
+	if err != nil {
+		return
+	}
+	var c counters
+	if json.Unmarshal(b, &c) != nil {
+		return
+	}
+	if c.NextUpdate > s.nextUpdate {
+		s.nextUpdate = c.NextUpdate
+	}
+	for id, n := range c.NextIDs {
+		if ch := s.chats[id]; ch != nil && n > ch.nextID {
+			ch.nextID = n
+		}
+	}
+}
+
+// saveCounters records the id spaces; callers hold mu.
+func (s *Server) saveCounters() {
+	if s.stateFile == "" {
+		return
+	}
+	c := counters{NextUpdate: s.nextUpdate, NextIDs: map[int64]int{}}
+	for id, ch := range s.chats {
+		c.NextIDs[id] = ch.nextID
+	}
+	b, _ := json.Marshal(c)
+	tmp := s.stateFile + ".tmp"
+	if os.WriteFile(tmp, b, 0o600) == nil {
+		os.Rename(tmp, s.stateFile)
+	}
 }
 
 // Token is the bot token the fake accepts.
@@ -248,6 +309,7 @@ func (s *Server) push(kind string, payload any) {
 	}
 	s.updates = append(s.updates, update{ID: s.nextUpdate, Kind: kind, Payload: payload})
 	s.nextUpdate++
+	s.saveCounters()
 }
 
 func contains(list []string, v string) bool {

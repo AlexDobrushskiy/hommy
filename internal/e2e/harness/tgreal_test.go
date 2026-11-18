@@ -84,6 +84,8 @@ func TestTgRealAlwaysPassesTheTestBot(t *testing.T) {
 		{"@hommy_test_abc123_bot", "e2e send text hi --chat @hommy_test_abc123_bot", []string{"send", "text", "hi"}},
 		{"hommy_test_abc123_bot", "e2e read messages --from bot --chat @hommy_test_abc123_bot",
 			[]string{"read", "messages", "--from", "bot"}},
+		{"@hommy_test_abc123_bot", "e2e send voice --path a.ogg --wait reply --chat @hommy_test_abc123_bot",
+			[]string{"send", "voice", "a.ogg", "--wait", "reply"}},
 	} {
 		os.Remove(record)
 		cmd := exec.Command("../../../scripts/tg-real.sh", c.args...)
