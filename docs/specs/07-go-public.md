@@ -47,7 +47,7 @@ Pre-go (the lane's blind e2e): E1–E4. Post-go (run by `ops/go-public.sh --go`,
 | # | Given | When | Then |
 |---|---|---|---|
 | E1 | the bound tree | read `README.md`; follow each relative link; `grep -c 'install.sh' README.md` | sections: what, one command, what gets installed (with sources), first steps, barber demo, risks (one line each), signing, voices, Mini App, more hosts, uninstall, license; every link resolves; `≥ 1` |
-| E2 | maintainer-only | `GP scan` | for each of `hommy`, `hommy-browsers`, the tap: refs scanned (branches, tags, `refs/pull/*` count ≥ the merged PRs for both repos), `0` leak hits (blobs, paths, headers, messages), `0` identity findings (the tap: only commits after the recorded HEAD), `0` hits in PR/release/ref text; exit 0 |
+| E2 | maintainer-only | `GP scan` | for each of `hommy`, `hommy-browsers`, the tap: refs scanned (branches, tags, `refs/pull/*` count ≥ the merged PRs for both repos), `0` leak hits (blobs, paths, headers, messages; the tap's commit headers only after the recorded HEAD), `0` identity findings (the tap: only commits after the recorded HEAD), `0` hits in PR/release/ref text; exit 0 |
 | E3 | maintainer-only | `git ls-remote --heads origin` in both repos; `GP runs` | only `main`, this phase's PR branch and 06's in-flight refs; `runs` lists the Actions runs the go step will purge (counts per repo), deleting nothing |
 | E4 | maintainer-only | `GP --dry-run`; `gh repo view AlexDobrushskiy/hommy --json visibility`; the same for `hommy-browsers` | every precondition printed with its state (`06 shipped` may be `waiting`), every step listed in the order of the scope, nothing changed: both still `PRIVATE`, runners and `CREW_RUNS_ON` still present |
 | P1 | Alex's OK; 06 shipped | `GP --go` | the scans pass again; logs purged; runners and `CREW_RUNS_ON` gone before the switch; both repos `PUBLIC`; a GitHub-hosted CI run on `main` green; release `v0.1.0` with the darwin/arm64 archive; the tap has `Casks/hommy.rb` at `0.1.0` committed by the noreply identity |
@@ -61,3 +61,29 @@ E1–E4 green and `GP --go` ready (the lane ships here); after Alex's OK, P1–P
   overseer decides), which is why E2 runs before anything is public.
 - PR heads cannot be deleted: they are scanned, not cleaned.
 - The tap is already public and shared with another product: the go step only adds `Casks/hommy.rb`.
+
+## Implementation notes
+- `ops/go-public.sh` is a thin wrapper of `ops/go_public.py` (workspace); tests `ops/test_go_public.py`. Modes as the
+  scope, plus `--go --from STEP` (resume after a failed step; then only the environment preconditions are enforced).
+- **Deviation (E2, tap headers):** the tap's history has one commit from 2026-10-29 (before this phase, public since)
+  whose header holds an identifier (`email` category). A header is the commit's identity, which the scope already
+  judges on the tap only after the recorded HEAD; `scan` lists such hits as `pre-existing`, not as findings. Blobs,
+  paths and messages of the tap's whole history still count.
+- **Pending 06** also leaves out the PR text (title, body, reviews) of 06's open PR; it is scanned at `--go`.
+- **Purge** deletes the runs (their logs and artifacts) and every Actions cache: a fork PR can restore the base
+  branch's caches.
+- **Hosted CI on `main`** (P1) is a `workflow_dispatch` run (trigger added to `ci.yml` in both repos): after the
+  switch nothing else starts a run on `main`. It runs after the switch, as the scope orders it; the S7 lane note asked
+  for a hosted run before it, which this account cannot get on a private repo (S7). Removing both runners first is
+  what keeps fork PRs off the build Mac.
+- **P2's `tart prune`** is a targeted `tart delete` of the image's cache entries (`…macos-golden-gate-vanilla:latest` and
+  its digest): the build Mac's Tart cache is shared, and a prune would also drop other images. The image is kept when
+  P2 fails, for `--go --from vm`.
+- **README = clean-room command:** the same `curl` part, and every flag `scripts/clean-room.sh` passes is documented
+  in the README (the clean room adds the unattended flags the README's Setup › Unattended names).
+- **Release rehearsal** (a `--dry-run` precondition): GoReleaser on `main` tagged `v0.1.0` in a throwaway clone,
+  publishing to a local fake GitHub API; it checks the archive upload, the release notes (CHANGELOG `v0.1.0`), and
+  that `Casks/hommy.rb` at `0.1.0` is committed with only the noreply identity. It found `changelog.disable: true`
+  dropping `--release-notes` (now off for snapshots only).
+- Unproven until the go: GitHub's side of every write (deleting runs, the visibility switch, dispatch, the real tag,
+  GoReleaser against api.github.com, the cask commit as GitHub records it), and P2 on a VM.

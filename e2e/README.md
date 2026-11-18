@@ -534,3 +534,53 @@ scripts/clean-room.sh down
 .dev/tools/tart list                          # no hommy-* VM, the cached image only
 scripts/live-guard.sh check
 ```
+
+## Go public (07)
+
+Phase 07's pre-go rows (E1–E4) run before anything is public; nothing here changes a repo, a runner or a variable.
+`GP` is the workspace's `ops/go-public.sh` (maintainer-only: it needs the workspace, `gh` signed in and the identifiers
+list). From any hommy checkout, a workslot included:
+
+```sh
+GP=$(cd "$(git rev-parse --git-common-dir)/../.." && pwd -P)/ops/go-public.sh   # app/.git → the workspace
+"$GP"                                   # usage; exit 2
+```
+
+E1 (the bound tree's README):
+
+```sh
+grep -n '^#' README.md                  # the sections the row names
+grep -o '\]([^)]*)' README.md | sed 's/^](//; s/)$//' | sort -u | while read -r p; do
+  case $p in http*) printf '%s %s\n' "$(curl -s -o /dev/null -w '%{http_code}' -L -m 15 "$p")" "$p" ;;
+             *) [ -e "${p%%#*}" ] && echo "ok $p" || echo "MISSING $p" ;; esac; done
+grep -c 'install.sh' README.md          # >= 1
+```
+
+Relative links must all be `ok`. Until the go, `https://github.com/AlexDobrushskiy/hommy-browsers` answers 404 to an
+anonymous `curl` (the repo is private); every other external link answers 200.
+
+E2–E4 (each `GP` mode except `--go` is read-only; the scan clones fresh mirrors into a temp dir and deletes them):
+
+```sh
+"$GP" scan; echo "exit $?"              # E2: per repo refs, history leak hits, identities, PR/issue/release/ref text,
+                                        # stray branches; `scan: clean (3 repos)`, exit 0
+git ls-remote --heads https://github.com/AlexDobrushskiy/hommy.git            # E3
+git ls-remote --heads https://github.com/AlexDobrushskiy/hommy-browsers.git
+"$GP" runs                              # E3: runs / caches / artifacts per repo, `runs: nothing deleted`
+"$GP" --dry-run; echo "exit $?"         # E4: preconditions with [ok|waiting|red], then the 9 steps in order
+gh repo view AlexDobrushskiy/hommy --json visibility            # E4: {"visibility":"PRIVATE"}
+gh repo view AlexDobrushskiy/hommy-browsers --json visibility
+"$(dirname "$GP")/ci-runner.sh" status                          # runner hm-mac-1 + CREW_RUNS_ON still there
+"$(dirname "$GP")/ci-runner.sh" --repo AlexDobrushskiy/hommy-browsers status
+```
+
+- `scan` before 06 ships lists 06's refs (`phase-06`, `ci-probe/06-*`, the PR refs and PR text of its open PR) as
+  `pending`, not scanned; the tap's commit headers and identities count only after the HEAD `record-tap` stored
+  (`ops/go-public.tap-head`), older ones are listed as `pre-existing`. A hit prints `#N (category)`, never the text.
+- `--dry-run` before 06 and 07 ship: `06 shipped`, `07 prep shipped`, the README rows and the release rehearsal read
+  `waiting` (they judge `main`, where 07's README and release config land at ship); `CI green on main` is `waiting`
+  while main's newest run is for an older commit. The release rehearsal runs GoReleaser on main tagged `v0.1.0` in a
+  throwaway clone against a local fake GitHub API (nothing leaves the Mac).
+- The go itself (`"$GP" --go`, P1–P2) runs only after 06 shipped and the maintainer's OK, by the overseer; `--go --from
+  STEP` resumes after a failed step. Its logic is covered by `python3 -m unittest discover -s ops -p 'test_*.py'`
+  (`ops/test_go_public.py`: local bare repos and fakes of gh, the runner script, GoReleaser, `vm.sh`, tart).
