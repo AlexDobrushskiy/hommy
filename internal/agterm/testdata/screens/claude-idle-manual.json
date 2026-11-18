@@ -1,0 +1,12 @@
+{
+ "foreground": [
+  "/bin/zsh",
+  "-l",
+  "-c",
+  "claude --permission-mode default; exec /bin/zsh -l"
+ ],
+ "title": "✳ Hc-menu-probe.txt touch",
+ "status": "blocked",
+ "cursor": 2,
+ "expected": "ready"
+}

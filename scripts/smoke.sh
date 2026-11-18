@@ -1,5 +1,6 @@
 #!/bin/bash
-# The phase's critical path, fast: build, `hommy version`, the slot's test env (brought up when down), a fake
+# The phase's critical path, fast: build, `hommy version`, `hommy` with no args (usage, exit 2), the slot's test env
+# (brought up when down), the test instance's config (`hommy config path` under sx, 0600, written by `up`), a fake
 # Telegram round trip, a voice upload and download, a fake transcription, the claude stub through sx, the leak gate's
 # self-test (when present) and the live guard, all under the keychain guard (no keychain dialog, the real keychain
 # search list untouched). Prints PASS/FAIL per check; exit 1 on any FAIL.
@@ -31,7 +32,21 @@ c_secret() {
 }
 c_kcguard() { scripts/keychain-guard.sh check; }
 c_version() { "${sx[@]}" bin/hommy version | grep -q '^hommy '; }
-c_env() { scripts/test-env.sh status >/dev/null || scripts/test-env.sh up >/dev/null; scripts/test-env.sh status >/dev/null; }
+c_usage() {
+  local rc=0 err
+  err=$(bin/hommy 2>&1 >/dev/null) || rc=$?
+  [[ $rc == 2 ]] || { echo "exit $rc, want 2"; return 1; }
+  grep -qi usage <<<"$err"
+}
+c_config() {
+  local want f
+  want=$(hm_root "$slot")/home/.config/hommy-$(hm_instance "$slot")/hommy.env
+  f=$(scripts/hm.sh --slot "$slot" config path)
+  [[ $f == "$want" ]] || { echo "config path: $f, want $want"; return 1; }
+  [[ $(stat -f %Lp "$f") == 600 ]] || { echo "mode $(stat -f %Lp "$f")"; return 1; }
+  grep -q "^PORT_BASE=$(hm_base_port "$slot")$" "$f"
+}
+c_env() { scripts/test-env.sh up >/dev/null; scripts/test-env.sh status >/dev/null; }
 
 c_telegram() {
   local mark bot u id
@@ -75,7 +90,9 @@ c_guard() { scripts/live-guard.sh check; }
 scripts/keychain-guard.sh start >/dev/null
 check build c_build
 check "hommy version" c_version
+check "hommy without args: usage, exit 2" c_usage
 check "test env up" c_env
+check "test instance config (path, 0600, written by up)" c_config
 check "scratch keychain secret read" c_secret
 check "telegram round trip" c_telegram
 check "voice upload and download" c_voice

@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -580,5 +581,39 @@ func TestInitDataSignature(t *testing.T) {
 	}
 	if json.Unmarshal([]byte(fields["user"]), &u); u.ID != OtherID {
 		t.Fatalf("initData user: %s", fields["user"])
+	}
+}
+
+// A plain `wait --for reply` returns the next bot message the tester has not
+// seen, even when it arrived between the send and the wait; a second wait
+// returns the one after it.
+func TestWaitReplyCursor(t *testing.T) {
+	h := newHarness(t)
+	h.cli(nil, "send", "text", "hi")
+	msgOf(t, h.form("sendMessage", map[string]any{"chat_id": OwnerID, "text": "first"}, nil))
+	msgOf(t, h.form("sendMessage", map[string]any{"chat_id": OwnerID, "text": "second"}, nil))
+	for _, want := range []string{"first", "second"} {
+		_, d, _ := h.cli(nil, "wait", "--for", "reply", "--timeout", "2")
+		if w, _ := d["wait"].(map[string]any); w == nil || w["message"].(map[string]any)["text"] != want {
+			t.Fatalf("want %q: %v", want, d)
+		}
+	}
+}
+
+// A restarted fake with the same state file never reuses a message or update id.
+func TestIDsSurviveRestart(t *testing.T) {
+	st := filepath.Join(t.TempDir(), "ids")
+	a := New(Options{Token: "1:x", StateFile: st})
+	a.mu.Lock()
+	m := a.chats[OwnerID].add(&message{Text: "x"})
+	a.push("message", map[string]any{})
+	a.mu.Unlock()
+	b := New(Options{Token: "1:x", StateFile: st})
+	b.mu.Lock()
+	m2 := b.chats[OwnerID].add(&message{Text: "y"})
+	next := b.nextUpdate
+	b.mu.Unlock()
+	if m2.ID <= m.ID || next <= 1 {
+		t.Fatalf("ids restarted: %d after %d, next update %d", m2.ID, m.ID, next)
 	}
 }

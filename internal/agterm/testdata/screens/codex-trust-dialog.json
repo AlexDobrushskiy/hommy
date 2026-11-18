@@ -1,0 +1,12 @@
+{
+ "foreground": [
+  "/bin/zsh",
+  "-l",
+  "-c",
+  "codex; exec /bin/zsh -l"
+ ],
+ "title": "",
+ "status": "",
+ "cursor": 1,
+ "expected": "menu"
+}

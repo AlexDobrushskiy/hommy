@@ -1,0 +1,12 @@
+{
+ "foreground": [
+  "/bin/zsh",
+  "-l",
+  "-c",
+  "env HOME=/Users/tester claude --dangerously-skip-permissions; exec /bin/zsh -l"
+ ],
+ "title": "✳ Pong reply request",
+ "status": "",
+ "cursor": 15,
+ "expected": "draft"
+}

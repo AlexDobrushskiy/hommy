@@ -1,0 +1,12 @@
+{
+ "foreground": [
+  "/bin/zsh",
+  "-l",
+  "-c",
+  "env HOME=/Users/tester claude --dangerously-skip-permissions; exec /bin/zsh -l"
+ ],
+ "title": "◑ Sleep 20 shell test",
+ "status": "active",
+ "cursor": 2,
+ "expected": "working"
+}

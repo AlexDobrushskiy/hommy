@@ -1,0 +1,12 @@
+{
+ "foreground": [
+  "/bin/zsh",
+  "-l",
+  "-c",
+  "claude; exec /bin/zsh -l"
+ ],
+ "title": "",
+ "status": "",
+ "cursor": 1,
+ "expected": "menu"
+}

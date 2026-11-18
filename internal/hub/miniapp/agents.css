@@ -1,0 +1,53 @@
+/* Board + console (layout and density from the approved mockup). app.css has the theme tokens. */
+:root[data-theme="dark"] { --p-warn: #fb923c; --p-ok: #4ade80; }
+:root[data-theme="light"] { --p-warn: #c2410c; --p-ok: #15803d; }
+:root { --p-term: #0e1116; --p-termfg: #c9d1d9; }
+body.console { padding-bottom: 64px; }
+.hd .ttl { display: flex; flex-direction: column; align-items: center; min-width: 0; max-width: calc(100% - 140px); }
+.hd .ttl b { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.hd .ttl span { font-size: 11.5px; color: var(--p-hint); font-weight: 400; }
+.health > div { min-width: 96px; }
+.health div div { padding: 0; min-width: 0; background: none; border-radius: 0; }
+.health .hn { display: flex; align-items: center; }
+.health .hv { color: var(--p-hint); font-size: 11px; }
+.health .off b { color: var(--p-hint); }
+.sec .n { text-transform: none; letter-spacing: 0; }
+.row .rname small { color: var(--p-hint); font-weight: 400; font-size: 12px; }
+.row .reasons { color: var(--p-warn); font-size: 12.5px; line-height: 1.35; }
+.row .reason { white-space: normal; overflow-wrap: anywhere; }
+.row .side { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: none; }
+.row .side .tags { display: flex; gap: 4px; align-items: center; }
+.badge { background: var(--p-btn); color: var(--p-btnfg); border-radius: 10px; font-size: 11.5px; padding: 0 7px; min-width: 20px; text-align: center; }
+.chip.paused, .chip.done { color: var(--p-link); border-color: var(--p-link); }
+.empty { padding: 9px 14px; background: var(--p-bg); color: var(--p-hint); font-size: 13px; border-bottom: 1px solid var(--p-line); }
+/* console */
+.cinfo { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+.cinfo .cwd { color: var(--p-hint); font-size: 12px; width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tabs { display: flex; gap: 6px; padding: 8px 10px; background: var(--p-bg); border-bottom: 1px solid var(--p-line); overflow-x: auto; }
+.tabs button { border: 1px solid var(--p-line); background: var(--p-bg2); color: var(--p-fg); border-radius: 14px; padding: 4px 10px;
+  font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+.tabs button.on { background: var(--p-btn); border-color: var(--p-btn); color: var(--p-btnfg); }
+.tabs .wrap { margin-left: auto; }
+.term { margin: 0; background: var(--p-term); color: var(--p-termfg); font: 11.5px/1.45 ui-monospace, Menlo, monospace; padding: 10px;
+  white-space: pre-wrap; word-break: break-word; min-height: calc(100vh - 210px); overflow: auto; }
+.term.nowrap { white-space: pre; word-break: normal; }
+/* terminal tab: the page fits the viewport and the terminal scrolls (so it can open at the newest line) */
+body.console.tv { height: 100vh; height: var(--tg-viewport-stable-height, 100vh); display: flex; flex-direction: column; overflow: hidden; }
+body.console.tv main { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+body.console.tv .term { flex: 1 1 0; min-height: 0; }
+.term .foot { color: #6e7681; }
+.file { margin: 0; background: var(--p-bg); color: var(--p-fg); font: 11.5px/1.45 ui-monospace, Menlo, monospace; padding: 10px 12px;
+  white-space: pre-wrap; word-break: break-word; min-height: 40vh; }
+.fpath { padding: 6px 12px; font-size: 11.5px; color: var(--p-hint); background: var(--p-bg2); word-break: break-all; }
+.kb { position: fixed; left: 0; right: 0; bottom: 0; background: var(--p-bg); border-top: 1px solid var(--p-line); padding: 6px;
+  padding-bottom: calc(6px + env(safe-area-inset-bottom)); display: flex; gap: 5px; z-index: 3; }
+.kb[hidden] { display: none; }
+.kb button { flex: 1; border: 0; background: var(--p-bg2); color: var(--p-fg); border-radius: 8px; padding: 10px 4px; font: inherit;
+  font-size: 13px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-shadow: 0 1px 1px rgba(0,0,0,.12); }
+.kb button.tgt { flex: 1.7; font-weight: 600; color: var(--p-link); }
+.kb button:disabled { opacity: .5; cursor: default; }
+.confirm { margin: 10px 14px; padding: 10px 12px; border-radius: 10px; background: var(--p-bg); border: 1px solid var(--p-warn); font-size: 13px;
+  overflow-wrap: anywhere; }
+.toast { position: fixed; left: 50%; bottom: 84px; transform: translateX(-50%); background: rgba(0,0,0,.82); color: #fff; padding: 7px 13px;
+  border-radius: 16px; font-size: 12.5px; opacity: 0; transition: opacity .2s; pointer-events: none; max-width: 90vw; z-index: 9; text-align: center; }
+.toast.show { opacity: 1; }

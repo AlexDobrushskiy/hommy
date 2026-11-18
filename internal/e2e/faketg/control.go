@@ -101,7 +101,11 @@ func (s *Server) Reset() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	fresh := New(Options{Token: s.token, Now: s.now, After: s.after})
-	s.chats, s.updates, s.nextUpdate, s.allowed = fresh.chats, nil, 1, nil
+	keep := s.nextUpdate
+	for id, c := range fresh.chats { // ids keep counting: a running hub has stored the old ones
+		c.nextID, c.onAdd = s.chats[id].nextID, s.saveCounters
+	}
+	s.chats, s.updates, s.nextUpdate, s.allowed = fresh.chats, nil, keep, nil
 	s.files, s.nextFile, s.calls, s.fault = fresh.files, 0, nil, nil
 	s.queries, s.nextQuery, s.draftSeq, s.commands, s.menu = fresh.queries, 0, 0, nil, nil
 	s.bump()
@@ -317,6 +321,9 @@ func (s *Server) sendLocked(kind string, f *flagSet, ws *waitSpec, uid int64, re
 	s.bump()
 	if w != nil && w.spec.kind == "reaction" {
 		w.only(m.ID)
+	}
+	if m.ID > c.seen {
+		c.seen = m.ID
 	}
 	return map[string]any{"chat": s.botRef(), "sent": s.view(c, m)}, w, nil
 }
@@ -562,6 +569,11 @@ func (s *Server) cliRead(args []string) (any, *cliError) {
 		if out == nil {
 			out = []botMessage{}
 		}
+		for _, m := range out {
+			if m.ID > c.seen {
+				c.seen = m.ID
+			}
+		}
 		return map[string]any{"chat": s.botRef(), "messages": out}, nil
 	case "keyboard":
 		return map[string]any{"chat": s.botRef(), "keyboard": s.keyboardView(c)}, nil
@@ -628,6 +640,9 @@ func (s *Server) cliWait(ctx context.Context, args []string) (any, *cliError) {
 	if err != nil {
 		s.mu.Unlock()
 		return nil, err
+	}
+	if since == 0 && kind == "reply" && c.seen > 0 {
+		since = c.seen
 	}
 	w := s.begin(c, waitSpec{kind: kind, since: since, msg: msg, all: f.bools["all"], timeout: timeout})
 	s.mu.Unlock()

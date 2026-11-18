@@ -3,28 +3,35 @@
 # TMPDIR HOMMY_*), HOME=/tmp/hm-s<N>/home, PATH=/tmp/hm-s<N>/bin:/opt/homebrew/bin:/usr/bin:/bin and
 # HOMEBREW_NO_AUTO_UPDATE=1. Nothing of the caller's Claude session (CLAUDE_CONFIG_DIR, CLAUDECODE, CLAUDE_CODE_*,
 # ANTHROPIC_*, wrapper variables) passes. Refuses (exit 3) when the real claude cannot be resolved by absolute path.
-#   scripts/sx.sh [--slot N] [--agterm-session ID] [--] CMD [ARGS…]
+#   scripts/sx.sh [--slot N] [--root DIR] [--agterm-session ID] [--] CMD [ARGS…]
+# --root: another scratch root of the slot (the second host's /tmp/hm-s<N>-h2): HOME=DIR/home, PATH=DIR/bin:….
 set -euo pipefail
 HM_ME=sx
 # shellcheck source-path=SCRIPTDIR source=lib/env.sh
 source "$(dirname "$0")/lib/env.sh"
 
 slot=$(hm_default_slot)
-agterm=''
+agterm='' root=''
 while (($#)); do
   case $1 in
     --slot) slot=${2:?--slot needs a number}; shift 2 ;;
+    --root) root=${2:?--root needs a directory}; shift 2 ;;
     --agterm-session) agterm=${2:?--agterm-session needs an id}; shift 2 ;;
     --) shift; break ;;
-    -h | --help) sed -n '2,7s/^# \{0,1\}//p' "$0"; exit 0 ;;
+    -h | --help) sed -n '2,8s/^# \{0,1\}//p' "$0"; exit 0 ;;
     *) break ;;
   esac
 done
-(($#)) || { sed -n '2,7s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+(($#)) || { sed -n '2,8s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 hm_check_slot "$slot"
 
-claude=$(hm_resolve_claude) || HM_DIE_CODE=3 hm_die "cannot resolve the real claude by absolute path (no Mach-O \`claude\` on PATH; set HOMMY_CLAUDE_BIN)"
-root=$(hm_root "$slot")
+if [[ -z $root ]]; then
+  root=$(hm_root "$slot")
+elif [[ $root != "$(hm_root "$slot")"-* ]]; then
+  hm_die "--root must be a scratch root of slot $slot ($(hm_root "$slot")-<name>), not $root"
+fi
+claude=$(hm_resolve_claude "$root") || claude=$(hm_resolve_claude "$(hm_root "$slot")") ||
+  HM_DIE_CODE=3 hm_die "cannot resolve the real claude by absolute path (no Mach-O \`claude\` on PATH; set HOMMY_CLAUDE_BIN)"
 mkdir -p "$root/home"
 chmod 700 "$root"
 hm_link_bin "$root" "$claude"

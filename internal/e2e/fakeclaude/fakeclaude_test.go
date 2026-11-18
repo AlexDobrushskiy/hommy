@@ -218,3 +218,17 @@ func TestArgvLogHasNoEnv(t *testing.T) {
 		t.Fatalf("argv log: %v %s", err, b)
 	}
 }
+
+func TestModeTextSkipsTheHubsEnvelope(t *testing.T) {
+	for in, want := range map[string]string{
+		"[voice message, transcribed]\ntts: weather is fine": "tts: weather is fine",
+		"[photo]\necho: x\n\n[Image attached: /p]":           "echo: x\n\n[Image attached: /p]",
+		"[Telegram · tg-5] echo: hi":                         "echo: hi",
+		"echo: plain":                                        "echo: plain",
+		"[not a header] echo: y":                             "[not a header] echo: y",
+	} {
+		if got := modeText(in); got != want {
+			t.Errorf("%q → %q, want %q", in, got, want)
+		}
+	}
+}

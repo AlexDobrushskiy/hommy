@@ -1,0 +1,12 @@
+{
+ "foreground": [
+  "/bin/zsh",
+  "-l",
+  "-c",
+  "env HOME=/Users/tester claude --dangerously-skip-permissions; exec /bin/zsh -l"
+ ],
+ "title": "✳ Claude Code",
+ "status": "",
+ "cursor": 2,
+ "expected": "draft"
+}

@@ -26,16 +26,22 @@ hm_base_port() { echo $((HM_PORT_BASE + HM_PORT_STEP * $1)); }
 # The scratch root: /tmp/hm-s<N> (HOMMY_SCRATCH_BASE replaces /tmp for unit tests).
 hm_root() { echo "${HOMMY_SCRATCH_BASE:-/tmp}/hm-s$1"; }
 
-# The instance's Keychain service in the scratch keychain: hommy-test (slot 0), hommy-test-s<N>.
-hm_service() { if (($1 == 0)); then echo hommy-test; else echo "hommy-test-s$1"; fi; }
+# The slot's test instance: test (slot 0), test-s<N>. Its Keychain service in the scratch keychain: hommy-<instance>.
+hm_instance() { if (($1 == 0)); then echo test; else echo "test-s$1"; fi; }
+hm_service() { echo "hommy-$(hm_instance "$1")"; }
+
+# The second-host instance of a slot (02-E15: `--join`): name, scratch root, HOST_NAME.
+hm_h2_instance() { echo "$(hm_instance "$1")-h2"; }
+hm_h2_root() { echo "$(hm_root "$1")-h2"; }
 
 # The launchd label prefix of the slot's test agents.
 hm_label_prefix() { if (($1 == 0)); then echo dev.hommy.test.; else echo "dev.hommy.test-s$1."; fi; }
 
 # The real claude by absolute path: HOMMY_CLAUDE_BIN, else the first `claude` on PATH that is a Mach-O executable
-# (shell-script shims in front of it are skipped).
+# (shell-script shims in front of it are skipped), else what ROOT/bin/claude links to (a scratch root `up` already
+# set: the host's agterm sessions run AGENT_COMMAND with a PATH that has no real claude).
 hm_resolve_claude() {
-  local p dir
+  local p dir root=${1:-}
   if [[ -n ${HOMMY_CLAUDE_BIN:-} ]]; then
     [[ $HOMMY_CLAUDE_BIN == /* && -x $HOMMY_CLAUDE_BIN ]] || return 1
     echo "$HOMMY_CLAUDE_BIN"
@@ -51,7 +57,9 @@ hm_resolve_claude() {
       return 0
     fi
   done
-  return 1
+  p=$(readlink "$root/bin/claude" 2>/dev/null) || return 1
+  [[ -n $root && $p == /* && -x $p ]] && /usr/bin/file -bL "$p" 2>/dev/null | grep -q '^Mach-O' || return 1
+  echo "$p"
 }
 
 # hm_link_bin ROOT CLAUDE: ROOT/bin links to the real claude, uv, node, npm, git, go (whichever exist).

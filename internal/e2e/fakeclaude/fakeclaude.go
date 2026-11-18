@@ -304,6 +304,28 @@ func (m *emitter) stream(ev map[string]any, msgID string) {
 	}
 }
 
+// modeText drops what the hub wraps around the owner's words before the mode
+// prefix is read: leading bracketed header lines (`[voice message, transcribed]`,
+// `[photo]`) and a typed `[Telegram · tg-…] ` prefix.
+func modeText(prompt string) string {
+	p := strings.TrimLeft(prompt, " \n")
+	for {
+		line, rest, more := strings.Cut(p, "\n")
+		t := strings.TrimSpace(line)
+		if more && strings.HasPrefix(t, "[") && strings.HasSuffix(t, "]") && !strings.Contains(t[1:len(t)-1], "]") {
+			p = strings.TrimLeft(rest, " \n")
+			continue
+		}
+		break
+	}
+	if strings.HasPrefix(p, "[Telegram · ") {
+		if i := strings.Index(p, "] "); i > 0 {
+			p = p[i+2:]
+		}
+	}
+	return p
+}
+
 func usageJSON(out int) map[string]any {
 	return map[string]any{"input_tokens": 1, "cache_creation_input_tokens": 0, "cache_read_input_tokens": 0, "output_tokens": out}
 }
@@ -316,6 +338,7 @@ func (e *Env) answer(o opts, prompt, sid string, turns int) int {
 		"model": Model, "permissionMode": "default", "slash_commands": []any{}, "apiKeySource": "none",
 		"claude_code_version": Version, "output_style": "default", "agents": []any{}, "skills": []any{}, "plugins": []any{}})
 
+	prompt = modeText(prompt)
 	lower := strings.ToLower(prompt)
 	if strings.HasPrefix(lower, "fail:") {
 		fmt.Fprintln(e.Stderr, "API Error: stub failure requested ("+strings.TrimSpace(prompt[5:])+")")
