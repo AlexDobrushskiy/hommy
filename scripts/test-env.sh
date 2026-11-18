@@ -68,8 +68,10 @@ any_running() {
 labels() { launchctl list 2>/dev/null | awk -v p="$(hm_label_prefix "$slot")" 'index($3, p) == 1 { print $3 }'; }
 
 stop_all() {
-  local name label
+  local name label f
   for name in faketg fakespeech static-site; do hm_svc_stop "$root" "$name"; done
+  # and every other detached service of the slot (booking-site, …): one pid file each in run/
+  for f in "$root"/run/*.pid; do [[ -f $f ]] && hm_svc_stop "$root" "$(basename "$f" .pid)"; done
   while read -r label; do
     [[ -n $label ]] && { launchctl bootout "gui/$(id -u)/$label" 2>/dev/null || true; }
   done < <(labels)

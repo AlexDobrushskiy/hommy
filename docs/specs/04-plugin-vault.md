@@ -59,11 +59,26 @@ port 4735); `CS` = `scripts/claude-session.sh --slot 2` (real Claude, testing.md
 | E3 | `up` | `echo '{}' \| env -i HOME=/tmp/none PATH=/usr/bin:/bin plugin/bin/hommy-hook stop; echo $?`; the same with a slow fake `hommy` on PATH that sleeps 30 s (README "Plugins" gives it), timed | no output, exit 0; then no output, exit 0 in under 5 s |
 | E4 | `up` | `scripts/vault.sh init V`; `scripts/vault-lint.sh V`; `scripts/vault.sh init V; echo $?`; `grep -c 'book-local-service\|email-triage\|find-and-buy' V/AGENTS.md` | lint `ok`; second init exit 3 (`not empty`); `3` (each recipe routed) |
 | E5 | `B up` | `curl -s 127.0.0.1:4735/ \| grep -c 'Barbearia Exemplo'`; `curl -s "127.0.0.1:4735/confirm?service=haircut&date=$(date -v+1d +%F)&time=10:30" \| grep -c 'Confirm booking'`; `B log` | `≥ 1`, `1`; the log has the two GETs and no POST |
-| E6 `claude=real` | `up`; E4's vault; `scripts/vault.sh add-place V "Barbearia Exemplo" http://127.0.0.1:4735/`; `B reset` | `CS -p --cwd V --stream /tmp/hm-s2/e6.jsonl "Book a haircut at Barbearia Exemplo tomorrow at 10:30."`; `B log`; the transcript queries of README "Real Claude" on `/tmp/hm-s2/e6.jsonl` | the transcript reads `prompt/book-local-service.md` before its first browser tool call; its browser calls are the `pw-lane` tools of hommy-browsers; the site log has `GET /confirm` with `date=<tomorrow>` and `time=10:30` and **no** `POST /bookings`; the final answer asks to confirm that slot; `browser-reaper --json` lists no test Chrome afterwards |
+| E6 `claude=real` | `up`; E4's vault; `scripts/vault.sh add-place V "Barbearia Exemplo" http://127.0.0.1:4735/`; `B reset` | `CS -p --cwd V --stream /tmp/hm-s2/e6.jsonl "Book a haircut at Barbearia Exemplo tomorrow at 10:30." -- --dangerously-skip-permissions` (the flag hommy starts sessions with, I7); `B log`; the transcript queries of README "Real Claude" on `/tmp/hm-s2/e6.jsonl` | the transcript reads `prompt/book-local-service.md` before its first browser tool call; its browser calls are the `pw-lane` tools of hommy-browsers; the site log has `GET /confirm` with `date=<tomorrow>` and `time=10:30` and **no** `POST /bookings`; the final answer asks to confirm that slot; `browser-reaper --json` lists no test Chrome afterwards |
 | E7 | clean tree | `scripts/leak-scan.sh plugin vault-template .claude-plugin`; `scripts/test-env.sh down --slot 2 --purge`; `scripts/live-guard.sh check` | `0 hits`; `ok` |
 
 **Unit:** shim exit 0 on every failure path (missing binary, bad instance, slow host); `vault.sh init` refuses a
 non-empty dir; template lint on a broken copy; booking site date window and log format.
+
+## Implementation notes
+
+- Deviation (E6, how it is tested): a `-p` run without a permission mode cannot call MCP or Bash tools (nothing
+  answers the prompt), so the row passes `--dangerously-skip-permissions`, the flag hommy adds to every session it
+  starts (I7). The product behaviour the row judges is unchanged.
+- `scripts/test-env.sh down` also stops every other detached service of the slot (one pid file each in `run/`), so
+  the booking site goes down with the slot (E7).
+- The hommy-browsers test install lives at `home/.local/share/hommy-test-s<N>-browsers` (testing.md §10, master §3.1).
+- A local-directory marketplace plugin loads from its directory (Claude Code does not copy it into its cache), so an
+  edit in `plugin/` needs no reinstall in the scratch HOME.
+- Review r1: `wacli-guard session-start` (a second SessionStart hook) writes `export WACLI_READONLY=1` to
+  `CLAUDE_ENV_FILE` when `wacli` is installed and the user has not set the variable, so the whatsapp skill's
+  read-only guard rail holds even for a write the guard's parser misses. The guard also treats a program word built
+  from a substitution that names wacli (`"$(command -v wacli)"`, `` `which wacli` ``, `w=$(which wacli); $w`) as wacli.
 
 ## Done
 E1–E7 green; README sections; CI green.

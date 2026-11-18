@@ -1,0 +1,3 @@
+#!/bin/sh
+# A hung `hommy`: the hook shim must give up on it (e2e/README.md › Plugins, row 04-E3).
+sleep 30

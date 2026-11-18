@@ -45,7 +45,7 @@ its slot is in use, naming it.
 
 ## 3. Scratch root, `sx`, keychain
 
-`scripts/test-env.sh up|down|status|home [--slot N] [--layout browsers] [--plugins] [--tg real] [--no-start]
+`scripts/test-env.sh up|down|status|home [--slot N] [--layout browsers] [--tg real] [--no-start]
 [--instance X --join] [--purge]`:
 - Scratch root `/tmp/hm-s<N>/` (short: unix socket paths stay far below macOS's 104 bytes; outside every
   `CLAUDE.md` ancestry, so a test session never loads the build workspace's instructions): `home/` (the scratch
@@ -160,7 +160,9 @@ default `large-v3-turbo`) and `kokoro` (mlx-audio in the scratch `HOME`'s uv too
 
 Per instance (master §3.1): `HB_HOME=/tmp/hm-s<N>/home/.local/share/hommy-test[-sN]-browsers` (a checkout of the tree
 under test), `config.env` from the layout (§2), pool 0 (layout A) or 1 (layout B), labels `dev.hommy.test[-sN].browsers`,
-no captcha models. `install.sh --uninstall` and `test-env.sh down` remove it; `browser-reaper --json` must list no Chrome
+no captcha models. Layout A installs come from `scripts/plugins-env.sh up --slot N` (04: the engine from its
+`origin/main`, then the plugins `hommy`, `hommy-browsers` and `retainer` in the scratch `HOME`; `e2e/README.md` ›
+Plugins). `install.sh --uninstall` and `test-env.sh down` remove it; `browser-reaper --json` must list no Chrome
 of the test install at the end of a row that opened one.
 
 ## 11. CI

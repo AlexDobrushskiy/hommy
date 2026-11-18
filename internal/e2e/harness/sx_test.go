@@ -39,7 +39,7 @@ func TestSxScrubsTheEnvironment(t *testing.T) {
 		"ANTHROPIC_X=1", "ANTHROPIC_API_KEY=planted", "CLAUDECODE=1", "AGTERM_SESSION_ID=planted-session",
 		"SOME_WRAPPER_VAR=1", "HOMMY_FOO=bar", "HOMMY_CLAUDE_BIN=/usr/bin/true",
 	}
-	got, base, code := runSx(t, planted)
+	got, base, code := runSx(t, planted, "--slot", "0") // explicit: a workslot checkout defaults to its own slot
 	if code != 0 {
 		t.Fatalf("sx exit %d: %v", code, got)
 	}

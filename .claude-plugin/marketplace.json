@@ -1,0 +1,14 @@
+{
+  "name": "hommy",
+  "owner": { "name": "hommy" },
+  "metadata": {
+    "description": "hommy: a Telegram voice note becomes an errand done by a Claude Code session on your Mac"
+  },
+  "plugins": [
+    {
+      "name": "hommy",
+      "source": "./plugin",
+      "description": "hommy's Claude Code side: the hooks that answer in Telegram, agterm status, the WhatsApp and Telegram guards, and the notify, whatsapp, telegram and shopping-research skills"
+    }
+  ]
+}

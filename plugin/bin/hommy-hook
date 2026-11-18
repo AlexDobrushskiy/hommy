@@ -1,0 +1,36 @@
+#!/bin/sh
+# hommy's Claude Code hook shim (master spec §4.5): runs `hommy [--instance X] hook <event>` with the hook payload on
+# stdin, discards its output and always exits 0, within 5 s whatever the binary does.
+#   hommy-hook session-start|user-prompt-submit|stop|notify
+# Instance: CLAUDE_PLUGIN_OPTION_INSTANCE (the plugin's userConfig), else HOMMY_INSTANCE; empty = the default instance.
+# Binary: ~/.local/share/hommy[-X]/bin/hommy, else `hommy` on PATH, else nothing to do.
+ev=${1:-}
+case $ev in session-start | user-prompt-submit | stop | notify) ;; *) exit 0 ;; esac
+inst=${CLAUDE_PLUGIN_OPTION_INSTANCE:-${HOMMY_INSTANCE:-}}
+if [ -n "$inst" ]; then
+  # an instance name hommy would refuse: nothing to deliver to
+  case $inst in *[!a-z0-9-]*) exit 0 ;; esac
+  [ ${#inst} -le 24 ] || exit 0
+fi
+bin=${HOME:-/nonexistent}/.local/share/hommy${inst:+-$inst}/bin/hommy
+if [ ! -x "$bin" ]; then
+  bin=$(command -v hommy 2>/dev/null) || exit 0
+  [ -n "$bin" ] || exit 0
+fi
+# The shell's own stderr too: it reports the killed watchdog ("Terminated") when it notices it before exiting.
+exec 2>/dev/null
+# An asynchronous command's stdin is /dev/null unless redirected explicitly: fd 3 carries the payload through.
+exec 3<&0
+if [ -n "$inst" ]; then
+  "$bin" --instance "$inst" hook "$ev" <&3 >/dev/null 2>&1 &
+else
+  "$bin" hook "$ev" <&3 >/dev/null 2>&1 &
+fi
+pid=$!
+exec 3<&-
+# Watchdog: hommy hook gives up at 4 s itself; a hung or foreign binary is killed at 4.2 s.
+(sleep 4.2 && kill -KILL "$pid") </dev/null >/dev/null 2>&1 &
+dog=$!
+wait "$pid" 2>/dev/null
+kill "$dog" 2>/dev/null
+exit 0

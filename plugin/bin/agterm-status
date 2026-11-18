@@ -1,0 +1,15 @@
+#!/bin/sh
+# agterm's session status from Claude Code hooks: agterm's bundled status script when agterm is installed and this
+# session runs inside it, else nothing. Always exit 0.
+#   agterm-status active|blocked|idle [--blink]
+[ -n "${AGTERM_SESSION_ID:-}" ] || exit 0
+for app in /Applications/agterm.app "${HOME:-/nonexistent}/Applications/agterm.app"; do
+  for s in agterm-claude-status.sh agterm-agent-status.sh; do
+    script=$app/Contents/Resources/agent-status/$s
+    if [ -x "$script" ]; then
+      AGTERMCTL=${AGTERMCTL:-$app/Contents/MacOS/agtermctl} "$script" "$@" </dev/null >/dev/null 2>&1
+      exit 0
+    fi
+  done
+done
+exit 0

@@ -1,0 +1,6 @@
+#!/bin/sh
+# PreToolUse guard of telegram-agent-cli (its `hook claude-pretooluse`: asks the user before a Telegram write) when
+# that CLI is installed; without it, a no-op.
+tgac=$(command -v telegram-agent-cli 2>/dev/null) || exit 0
+[ -n "$tgac" ] || exit 0
+exec "$tgac" hook claude-pretooluse

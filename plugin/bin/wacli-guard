@@ -1,0 +1,471 @@
+#!/usr/bin/env python3
+"""PreToolUse(Bash|Monitor) guard for wacli (WhatsApp CLI), from hommy's Claude Code plugin.
+
+Read-only wacli commands pass. Anything else (send, react, edit, revoke,
+mark-read, group changes, read-only overrides, unknown subcommands) gets a
+forced "ask" so the user approves that exact command. Without `wacli` on PATH
+the guard passes everything (nothing it could protect is installed).
+
+`wacli-guard session-start` (SessionStart hook) puts WACLI_READONLY=1 in the
+session's Bash environment (CLAUDE_ENV_FILE) when wacli is installed and the
+user has not set WACLI_READONLY themselves, so a write the parser misses still
+fails with "read-only mode".
+
+Commands are parsed with shfmt (a real bash/zsh parser), so wacli named inside
+data — a message, a heredoc, a commit message, a $'…' string — is not an
+invocation. Only programs the shell would actually run are checked.
+"""
+import codecs
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+import warnings
+
+RO = "WACLI_READONLY"
+
+# group -> allowed subcommands (None = the group itself has no subcommands)
+READ_ALLOW = {
+    "messages": {"list", "search", "show", "context", "export", "changes", "starred"},
+    "chats": {"list", "show"},
+    "contacts": {"search", "show", "resolve", "check"},
+    "groups": {"list", "info", "participants"},
+    "channels": {"list", "info"},
+    "history": {"coverage"},
+    "media": {"download"},
+    "store": {"stats"},
+    "accounts": {"list", "show"},
+    "profile": {"get-about", "picture-info"},
+    "calls": {"list"},
+    "polls": {"list"},
+    "poll": {"show"},
+    "auth": {"status"},
+    "doctor": None,
+    "version": None,
+    "help": None,
+    "docs": None,
+    "completion": None,
+}
+# reads that fetch from the network, so wacli needs WACLI_READONLY=0 for them
+# groups that act when run bare (auth = pair this device), unlike groups that print help
+BARE_ACTS = {"auth"}
+OVERRIDE_OK = {("contacts", "check"), ("media", "download")}
+VALUE_FLAGS = {"--account", "--store", "--timeout", "--lock-wait", "--idle-exit", "--phone"}
+
+WRAPPERS = {"sudo", "exec", "command", "builtin", "nohup", "time", "nice", "timeout",
+            "caffeinate", "stdbuf", "xargs", "uv", "uvx", "poetry", "pipx", "run", "doas"}
+SHELLS = {"sh", "bash", "zsh", "dash", "ksh"}
+INTERPRETERS = {"node", "ruby", "perl", "php", "osascript", "deno", "bun"}
+PYTHON_RE = re.compile(r"python(\d+(\.\d+)?)?$")
+ENV_RE = re.compile(r"^[A-Za-z_]\w*=")
+DURATION_RE = re.compile(r"^\d+(\.\d+)?[smhd]?$")
+FALSEY = {"0", "false", "no", "off", ""}
+WACLI_RE = re.compile(r"\bwacli\b")
+SSH_VALUE_OPTS = set("BbcDEeFIiJLlmOoPpQRSWw")
+
+# interpreter code: runs a program, mentions wacli, and does a write or an override
+EXEC_RE = re.compile(r"subprocess|os\.system|os\.exec|popen|spawn|child_process|execSync|\bsystem\s*\(")
+CODE_OVERRIDE_RE = re.compile(RO + r"""['"\]]*\s*[=:,]\s*['"]?(?:0|false|no|off)?['"]?\s*[,)}\n;]""", re.I)
+WRITE_WORD_RE = re.compile(r"\bwacli\b[^\n]{0,80}?\b(?!(?:" + "|".join(
+    re.escape(g) for g in READ_ALLOW) + r")\b)(send|react|edit|revoke|delete|mark-read|sync|auth|pair|logout|"
+    r"create|leave|join|add|remove|promote|demote|set-\w+|block|unblock|archive|pin|mute)\b")
+
+# fallback when shfmt can't parse: crude text checks
+FB_OVERRIDE_RE = re.compile(RO + r"=(?:0|false|no|off|\"\"|''|\s|$)|--read-only[= ](?:false|0)|unset\s+" + RO, re.I)
+FB_CALL_RE = re.compile(r"(?:^|[;&|(`]|\n)\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:\S*/)?wacli((?:\s+[^\s;&|)]+)*)")
+
+
+class ParseError(Exception):
+    pass
+
+
+def shfmt_bin():
+    return shutil.which("shfmt") or next(
+        (p for p in ("/opt/homebrew/bin/shfmt", "/usr/local/bin/shfmt") if os.path.exists(p)), None)
+
+
+def parse(cmd):
+    exe = shfmt_bin()
+    if not exe:
+        raise ParseError("shfmt not installed")
+    for lang in ("bash", "zsh"):
+        try:
+            r = subprocess.run([exe, "-ln", lang, "--to-json"], input=cmd, capture_output=True,
+                               text=True, timeout=4)
+        except (OSError, subprocess.TimeoutExpired) as e:
+            raise ParseError(str(e))
+        if r.returncode == 0:
+            return json.loads(r.stdout)
+    raise ParseError("shfmt could not parse")
+
+
+def unescape(s):
+    return re.sub(r"\\(.)", r"\1", s, flags=re.S)
+
+
+def word(w):
+    """(text, dynamic, param names) of a shfmt Word."""
+    out, dyn, params = [], False, []
+    for p in (w or {}).get("Parts", []):
+        t = p.get("Type")
+        if t == "Lit":
+            out.append(unescape(p["Value"]))
+        elif t == "SglQuoted":
+            v = p["Value"]
+            if p.get("Dollar"):
+                v = v.replace("\\e", "\\x1b").replace("\\E", "\\x1b")
+                with warnings.catch_warnings():
+                    warnings.simplefilter("ignore")
+                    try:
+                        v = codecs.decode(v.encode("latin-1", "backslashreplace"), "unicode_escape")
+                    except Exception:
+                        pass
+            out.append(v)
+        elif t == "DblQuoted":
+            s, d, ps = word(p)
+            out.append(s)
+            dyn, params = dyn or d, params + ps
+        else:
+            dyn = True
+            if t == "ParamExp":
+                params.append(p.get("Param", {}).get("Value", ""))
+            out.append("\x00")
+    return "".join(out), dyn, params
+
+
+def falsey(text, dyn):
+    return dyn or text.strip().lower() in FALSEY
+
+
+def check_invocation(args):
+    """args = (text, dynamic) words after 'wacli'. Returns None if OK, else reason."""
+    positional = []
+    i = 0
+    while i < len(args):
+        a, dyn = args[i]
+        if not dyn and a in ("-h", "--help", "-v", "--version"):
+            return None
+        if a in VALUE_FLAGS:
+            i += 2
+            continue
+        if a.startswith("-") and not dyn:
+            i += 1
+            continue
+        positional.append((a, dyn))
+        i += 1
+    if not positional:
+        return None
+    group, gdyn = positional[0]
+    if gdyn:
+        return "wacli subcommand comes from an expansion"
+    if group not in READ_ALLOW:
+        return f"wacli {group} is not on the read-only allowlist"
+    subs = READ_ALLOW[group]
+    if subs is not None and len(positional) < 2 and group in BARE_ACTS:
+        return f"wacli {group} (bare) is not on the read-only allowlist"
+    if subs is None or len(positional) < 2:
+        return None  # bare group prints help
+    sub, sdyn = positional[1]
+    if sdyn:
+        return f"wacli {group} subcommand comes from an expansion"
+    if sub in subs:
+        return None
+    return f"wacli {group} {sub} is not on the read-only allowlist"
+
+
+class Scan:
+    def __init__(self):
+        self.calls = []        # list of [(text, dyn)] args per wacli run
+        self.override = False
+        self.reasons = []
+        self.wacli_vars = set()  # shell vars holding a wacli path
+        self.src = b""           # source of the script being walked (shfmt positions are byte offsets into it)
+
+    # -- entry points
+    def shell(self, cmd, depth=0):
+        if depth > 4:
+            return
+        outer, self.src = self.src, cmd.encode()
+        try:
+            self.walk(parse(cmd), depth)
+        finally:
+            self.src = outer
+
+    def raw(self, node):
+        """Source text of a shfmt node, e.g. the `$(command -v wacli)` a dynamic word was built from."""
+        try:
+            return self.src[node["Pos"]["Offset"]:node["End"]["Offset"]].decode(errors="replace")
+        except (KeyError, TypeError):
+            return ""
+
+    def code(self, text):
+        if re.search(r"\bwacli\b", text) and EXEC_RE.search(text) and (
+                WRITE_WORD_RE.search(text) or CODE_OVERRIDE_RE.search(text)):
+            self.reasons.append("interpreter code runs wacli with a write or a read-only override")
+
+    # -- AST walk
+    def walk(self, node, depth):
+        if isinstance(node, list):
+            for x in node:
+                self.walk(x, depth)
+            return
+        if not isinstance(node, dict):
+            return
+        cmd = node.get("Cmd")
+        if isinstance(cmd, dict):
+            redirs = node.get("Redirs") or []
+            if cmd.get("Type") == "CallExpr":
+                self.call(cmd, redirs, depth)
+            elif cmd.get("Type") == "DeclClause":
+                self.decl(cmd)
+        for v in node.values():
+            self.walk(v, depth)
+
+    def assign(self, name, val, dyn, params, src=""):
+        if name == RO and falsey(val, dyn):
+            self.override = True
+        if (os.path.basename(val) == "wacli" or any(p in self.wacli_vars for p in params)
+                or (dyn and WACLI_RE.search(src))):
+            self.wacli_vars.add(name)
+
+    def decl(self, cmd):
+        variant = (cmd.get("Variant") or {}).get("Value", "")
+        naked = []
+        for a in cmd.get("Args") or []:
+            name = (a.get("Name") or {}).get("Value")
+            if a.get("Naked"):
+                naked.append(name or word(a.get("Value"))[0])
+            elif name:
+                self.assign(name, *word(a.get("Value")), self.raw(a.get("Value")))
+        if variant == "export" and "-n" in naked and RO in naked:
+            self.override = True
+
+    def heredoc(self, redirs):
+        for r in redirs:
+            if r.get("Op") in ("<<", "<<-") and r.get("Hdoc"):
+                return word(r["Hdoc"])[0]
+            if r.get("Op") == "<<<" and r.get("Word"):
+                return word(r["Word"])[0]
+        return None
+
+    def call(self, cmd, redirs, depth):
+        for a in cmd.get("Assigns") or []:
+            self.assign(a["Name"]["Value"], *word(a.get("Value")), self.raw(a.get("Value")))
+        nodes = cmd.get("Args") or []
+        args = [word(a) for a in nodes]
+        i = 0
+        while i < len(args):
+            t, dyn, _ = args[i]
+            if dyn:
+                break
+            base = os.path.basename(t)
+            if base == "env":
+                i += 1
+                while i < len(args):
+                    t2, d2, p2 = args[i]
+                    if t2 in ("-u", "--unset"):
+                        if i + 1 < len(args) and args[i + 1][0] == RO:
+                            self.override = True
+                        i += 2
+                        continue
+                    if t2.startswith("--unset=") or (t2.startswith("-u") and len(t2) > 2):
+                        if t2.split("=", 1)[-1].lstrip("-u") == RO or t2[2:] == RO:
+                            self.override = True
+                        i += 1
+                        continue
+                    if t2.startswith("-"):
+                        i += 1
+                        continue
+                    if ENV_RE.match(t2):
+                        n, v = t2.split("=", 1)
+                        self.assign(n, v, d2, p2)
+                        i += 1
+                        continue
+                    break
+                continue
+            if base in WRAPPERS or (i > 0 and (t.startswith("-") or DURATION_RE.match(t))):
+                i += 1
+                continue
+            break
+        if i >= len(args):
+            return
+        prog, pdyn, pparams = args[i]
+        rest = args[i + 1:]
+        name = os.path.basename(prog)
+        if pdyn:
+            # "$w" holding a wacli path, or a substitution that names wacli: "$(command -v wacli)", `which wacli`
+            if (pparams and pparams[0] in self.wacli_vars) or WACLI_RE.search(self.raw(nodes[i])):
+                name = "wacli"
+            else:
+                return
+        if PYTHON_RE.match(name) and len(rest) >= 2 and rest[0][0] == "-m":
+            name, rest = rest[1][0], rest[2:]
+        ar = [(t, d) for t, d, _ in rest]
+        if name == "wacli":
+            self.calls.append(ar)
+        elif name in SHELLS:
+            for k, (t, d) in enumerate(ar):
+                if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", t) and k + 1 < len(ar):
+                    self.shell(ar[k + 1][0], depth + 1)
+                    return
+            files = [t for t, d in ar if not t.startswith("-")]
+            if files:
+                self.script_file(files[0], depth)
+            else:
+                body = self.heredoc(redirs)
+                if body is not None:
+                    self.shell(body, depth + 1)
+        elif name == "agtermctl":
+            # programs agterm runs: `overlay open CMD`, `--command CMD` (session new / scratch)
+            for k, (t, d) in enumerate(ar):
+                if t == "--command" and k + 1 < len(ar):
+                    self.shell(ar[k + 1][0], depth + 1)
+                elif t.startswith("--command="):
+                    self.shell(t.split("=", 1)[1], depth + 1)
+            pos = [t for t, _ in ar if not t.startswith("-")]
+            for k in range(len(pos) - 2):
+                if pos[k:k + 2] == ["overlay", "open"]:
+                    self.shell(pos[k + 2], depth + 1)
+                    break
+        elif name == "watch":
+            k = 0
+            while k < len(ar) and ar[k][0].startswith("-"):
+                k += 2 if ar[k][0] in ("-n", "--interval") else 1
+            self.shell(" ".join(t for t, _ in ar[k:]), depth + 1)
+        elif name == "eval":
+            self.shell(" ".join(t for t, _ in ar), depth + 1)
+        elif name == "ssh":
+            k = 0
+            host = False
+            while k < len(ar):
+                t = ar[k][0]
+                if not host and t.startswith("-") and len(t) > 1:
+                    if t[-1] in SSH_VALUE_OPTS and len(t) == 2:
+                        k += 1
+                    k += 1
+                    continue
+                if not host:
+                    host = True
+                    k += 1
+                    continue
+                self.shell(" ".join(x for x, _ in ar[k:]), depth + 1)
+                return
+            body = self.heredoc(redirs)
+            if host and body is not None:
+                self.shell(body, depth + 1)
+        elif name == "unset":
+            if any(t == RO for t, _ in ar):
+                self.override = True
+        elif name in ("export", "declare", "typeset", "local", "readonly"):
+            for t, d in ar:
+                if ENV_RE.match(t):
+                    n, v = t.split("=", 1)
+                    self.assign(n, v, d, [])
+                elif t == RO and name == "export" and any(x == "-n" for x, _ in ar):
+                    self.override = True
+        elif PYTHON_RE.match(name) or name in INTERPRETERS:
+            for k, (t, d) in enumerate(ar):
+                if t in ("-c", "-e", "--eval") and k + 1 < len(ar):
+                    self.code(ar[k + 1][0])
+                    return
+            body = self.heredoc(redirs)
+            if body is not None:
+                self.code(body)
+
+    def script_file(self, path, depth):
+        p = os.path.expanduser(path)
+        try:
+            if os.path.isfile(p) and os.path.getsize(p) < (1 << 20):
+                with open(p, errors="replace") as f:
+                    text = f.read()
+                if re.search(r"wacli|" + RO, text, re.I):
+                    self.shell(text, depth + 1)
+        except (OSError, ParseError):
+            pass
+
+
+def fallback(cmd):
+    """Text-only checks for a command shfmt can't parse (bash can't run it either)."""
+    reasons = []
+    calls = []
+    for m in FB_CALL_RE.finditer(cmd):
+        toks = [(t.strip("'\""), False) for t in m.group(1).split()]
+        calls.append(toks)
+        r = check_invocation(toks)
+        if r:
+            reasons.append(r)
+    if FB_OVERRIDE_RE.search(cmd) and not (calls and all(
+            tuple(t for t, _ in c if not t.startswith("-"))[:2] in OVERRIDE_OK for c in calls)):
+        reasons.append("overrides WACLI_READONLY / --read-only")
+    return reasons
+
+
+def scan(cmd):
+    s = Scan()
+    try:
+        s.shell(cmd)
+    except ParseError:
+        return fallback(cmd)
+    reasons = list(s.reasons)
+    only_check = bool(s.calls)
+    for args in s.calls:
+        r = check_invocation(args)
+        if r:
+            reasons.append(r)
+        if any(t.startswith("--read-only") and re.search(r"(=|^)(false|0)$", t) for t, _ in args) or any(
+                t == "--read-only" and k + 1 < len(args) and args[k + 1][0] in ("false", "0")
+                for k, (t, _) in enumerate(args)):
+            s.override = True
+        pos = [t for t, d in args if not t.startswith("-")]
+        only_check = only_check and tuple(pos[:2]) in OVERRIDE_OK
+    if s.override and not only_check:
+        reasons.append("overrides WACLI_READONLY / --read-only")
+    return reasons
+
+
+def session_start():
+    env_file = os.environ.get("CLAUDE_ENV_FILE")
+    if env_file and shutil.which("wacli") and RO not in os.environ:
+        try:
+            with open(env_file, "a") as f:
+                f.write(f"export {RO}=1\n")
+        except OSError:
+            pass
+    return 0
+
+
+def main():
+    if sys.argv[1:] == ["session-start"]:
+        return session_start()
+    try:
+        data = json.load(sys.stdin)
+    except Exception:
+        return 0
+    if data.get("tool_name") not in ("Bash", "Monitor"):
+        return 0
+    if not shutil.which("wacli"):
+        return 0
+    cmd = (data.get("tool_input") or {}).get("command") or ""
+    if not re.search(r"wacli", cmd, re.I):
+        return 0
+    reasons = scan(cmd)
+    if not reasons:
+        return 0
+    out = {
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "ask",
+            "permissionDecisionReason": (
+                "WhatsApp write or visible action: needs the user's explicit OK for this exact command ("
+                + "; ".join(dict.fromkeys(reasons)) + ")"
+            ),
+        }
+    }
+    print(json.dumps(out))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

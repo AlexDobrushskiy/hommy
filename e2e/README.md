@@ -127,9 +127,80 @@ jq -r 'select(.type=="assistant") | .message.content[] | select(.type=="tool_use
 jq -r 'select(.type=="assistant") | .message.content[] | select(.type=="tool_use") | .name | select(startswith("mcp__")) | split("__")[1]' .dev/cs.jsonl | sort | uniq -c
 # MCP servers the session loaded, and their status
 jq -c 'select(.type=="system" and .subtype=="init") | .mcp_servers' .dev/cs.jsonl
+# every tool call in order (name + its file or URL): what came before the first browser call
+jq -r 'select(.type=="assistant") | .message.content[] | select(.type=="tool_use") | "\(.name) \(.input.file_path // .input.url // .input.command // "")"' .dev/cs.jsonl
 ```
 
 `scripts/mcp-call.sh PORT TOOL '<json>'` calls one tool on a streamable-HTTP MCP server directly.
+
+## Plugins
+
+`scripts/plugins-env.sh up --slot N` (after `scripts/test-env.sh up --slot N`) gives the slot's scratch `HOME` the
+three Claude Code plugins, through `scripts/sx.sh … claude plugin …`; it prints each plugin's state and ends with
+`ready`. Re-runs change nothing (`browsers: changed: 0`, `installed`).
+
+- **hommy-browsers** from its `origin/main` (`HOMMY_BROWSERS_REPO`, default its GitHub repo; fetched with the build
+  user's git, outside `sx`) as the slot's test install: `HB_HOME=/tmp/hm-s<N>/home/.local/share/hommy-test-s<N>-browsers`
+  (`scripts/plugins-env.sh hb-home`), layout A (lanes MCP `B+6`, identity `B+7`, Chrome debug `B+8`/`B+9`), pool 0,
+  labels `dev.hommy.test-s<N>.browsers.*`, its own `install.sh` (log: `/tmp/hm-s<N>/logs/plugins-env.log`). Plugin
+  `hommy-browsers@hommy-browsers` from that install, `lanes_port`/`identity_port`/`pool` set to the layout.
+- **hommy** (`hommy@hommy`): the marketplace at this checkout's root (`.claude-plugin/marketplace.json`), plugin
+  `plugin/`, `instance` = `test-s<N>` (`test` in slot 0). A local-directory plugin loads from the tree: edits need no
+  reinstall, only a new session.
+- **retainer** (`retainer@retainer`) from its public marketplace `AlexDobrushskiy/retainer`.
+
+```sh
+scripts/plugins-env.sh status --slot 2          # plugins enabled/disabled, the browsers' launchd labels
+SX claude plugin details hommy@hommy            # skills and hook events
+(cd /tmp/hm-s2/vault && SX claude mcp list)     # what a session there loads: plugin:hommy-browsers:* Connected
+SX "$(scripts/plugins-env.sh hb-home --slot 2)/browser-reaper" --json   # [] = no leaked test Chrome
+scripts/plugins-env.sh down --slot 2            # the browsers' services off (test-env.sh down also stops them)
+```
+
+hommy never writes hook entries into `settings.json`: the plugin carries them. **The hook shim**
+`plugin/bin/hommy-hook <event>` runs `hommy [--instance X] hook <event>` (X from the plugin's `instance`, else
+`HOMMY_INSTANCE`), output discarded, always exit 0, never longer than about 4.2 s. A hung `hommy` for row 04-E3 is
+`e2e/fixtures/slow-hommy/hommy` (sleeps 30 s):
+
+```sh
+echo '{}' | env -i HOME=/tmp/none PATH=/usr/bin:/bin plugin/bin/hommy-hook stop; echo $?
+time (echo '{}' | env -i HOME=/tmp/none PATH="$PWD/e2e/fixtures/slow-hommy:/usr/bin:/bin" plugin/bin/hommy-hook stop; echo $?)
+```
+
+The other shims are no-ops without their tool: `agterm-status` (outside agterm), `wacli-guard` (no `wacli` on PATH;
+with it, reads pass and anything else gets a forced `ask`; its `session-start` mode puts `WACLI_READONLY=1` into the
+session's Bash environment unless the user set it), `telegram-guard` (no `telegram-agent-cli`).
+
+## Vault
+
+```sh
+scripts/vault.sh init /tmp/hm-s2/vault          # the template (vault-template/ minus embed.go); exit 3 `not empty`
+scripts/vault-lint.sh /tmp/hm-s2/vault          # `ok`, or one `vault-lint: <path>: <problem>` line each (exit 1)
+scripts/vault.sh add-place /tmp/hm-s2/vault "Barbearia Exemplo" http://127.0.0.1:4735/ [--kind barber] [--notes …]
+```
+
+`test-env.sh up` leaves `/tmp/hm-s<N>/vault` empty, so `init` works there once. The lint checks: every path in
+`AGENTS.md`'s routing table exists, `index.md` lists every non-README file (files inside `inbox/` and `archive/`
+excepted), no folder is empty, every `context/` file starts with `## TL;DR`. `add-place` replaces a row of the same
+name (case-insensitive), keeping its kind and notes unless given.
+
+## Booking site
+
+"Barbearia Exemplo" (`hommy-e2e booking-site`), an invented barber, on `B+5` (slot 2: `http://127.0.0.1:4735`):
+
+```sh
+scripts/booking.sh --slot 2 up [--today 2026-01-25]   # detached; prints the URL (`--today` pins the site's date)
+scripts/booking.sh --slot 2 log                       # one JSON line per request: method, path, query, form
+scripts/booking.sh --slot 2 reset                     # empty the log, forget the bookings
+scripts/booking.sh --slot 2 bookings                  # [] or the recorded bookings (ref BX-<n>)
+scripts/booking.sh --slot 2 down                      # also stopped by scripts/test-env.sh down
+```
+
+`/` business page with a "Book" link; `/book?service=haircut|beard|haircut-beard` lists today and the 13 days after it
+(the site's clock, the Mac's time zone) × 09:00–18:00 every 30 min; `/confirm?service=haircut&date=YYYY-MM-DD&time=HH:MM`
+the summary and a "Confirm booking" button (a date outside the window or an off-slot time answers 400); `POST
+/bookings` records it and shows `Booked ✓ ref BX-<n>`. Browsers also fetch `/favicon.ico` (a logged `GET`). Control
+paths under `/_fake/` (health, reset, bookings) are not logged.
 
 ## Leak gate
 

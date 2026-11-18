@@ -1,0 +1,26 @@
+{
+  "name": "hommy",
+  "version": "0.1.0",
+  "description": "hommy's Claude Code side: hooks that bring a session's answers back to Telegram, agterm status, guards for WhatsApp and Telegram writes, and the notify, whatsapp, telegram and shopping-research skills",
+  "author": {
+    "name": "hommy contributors",
+    "url": "https://github.com/AlexDobrushskiy/hommy"
+  },
+  "license": "MIT",
+  "homepage": "https://github.com/AlexDobrushskiy/hommy",
+  "keywords": [
+    "telegram",
+    "voice",
+    "assistant",
+    "agterm"
+  ],
+  "userConfig": {
+    "instance": {
+      "type": "string",
+      "title": "hommy instance",
+      "description": "The hommy instance whose host receives this session's hooks (hommy --instance). Empty: the default instance.",
+      "default": "",
+      "sensitive": false
+    }
+  }
+}
