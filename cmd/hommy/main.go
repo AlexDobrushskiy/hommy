@@ -27,7 +27,9 @@ const usage = `usage: hommy [--instance NAME] [--config FILE] <command> [args]
   config get|set|unset|list|path [KEY] [VALUE]
   config permissions ask|skip        agent sessions ask before tools, or skip the prompts
   service install|uninstall [--purge]|start|stop|restart|status [hub|host|speech|all]
-  hub host-key add NAME              a key for another Mac's host (hommy setup --join)
+  hub host-key add|remove NAME       a key for another Mac's host (hommy setup --join), or drop it
+  vault init|add-recipes PATH        the vault template into an empty folder / its recipes into a vault
+  browsers configure                 hommy-browsers' config.env for this instance (install.sh runs it)
   hub | host                         the daemons (launchd runs them)
   send [--agent SLUG …] TEXT         message the owner (agent sessions)
   inbox list|ack|pending|wait        replies to an agent session
@@ -121,7 +123,9 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 0
 	case "hook":
 		return runHook(g, rest, stdin)
-	case "hub", "host", "config", "pair", "service", "doctor", "setup", "compose-state", "send", "inbox", "agterm-job":
+	case "vault":
+		return runVault(rest, stdout, stderr)
+	case "hub", "host", "config", "pair", "service", "doctor", "setup", "compose-state", "send", "inbox", "agterm-job", "browsers":
 	default:
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -149,6 +153,8 @@ func run(argv []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return runDoctor(c, rest, stdout, stderr)
 	case "setup":
 		return runSetup(c, g, rest, stdin, stdout, stderr)
+	case "browsers":
+		return runBrowsers(c, rest, stdout, stderr)
 	}
 	// Agent-session commands read the instance's settings through the env.
 	if err := c.Export(); err != nil {

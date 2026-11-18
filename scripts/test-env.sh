@@ -2,7 +2,9 @@
 # The slot's test environment (docs/testing.md §2–3): scratch root /tmp/hm-s<N>/ (HOME, bin links, keychain, logs),
 # test secrets in the scratch keychain, the fakes started detached on the slot's ports, and (layout A) the test
 # instance's config, Claude hooks file and vault (e2e/README.md › Test instance).
-#   scripts/test-env.sh up     [--slot N] [--layout browsers] [--no-start] [--tg real]   prints the ports, then `ready`
+#   scripts/test-env.sh up     [--slot N] [--layout browsers] [--no-start] [--no-instance] [--tg real]
+#                              prints the ports, then `ready`; --no-instance: no instance config, vault or hooks file
+#                              (install.sh / hommy setup writes the instance: 05's rows)
 #   scripts/test-env.sh up     [--slot N] --instance test[-sN]-h2 --join   second host: own scratch HOME; no hub, fakes, token
 #   scripts/test-env.sh down   [--slot N] [--purge] | --instance test[-sN]-h2   stops everything; --purge removes the root
 #   scripts/test-env.sh status [--slot N]                                    `up`, `partial` or `down` (exit 0 only for up)
@@ -15,18 +17,19 @@ HM_ME=test-env
 # shellcheck source-path=SCRIPTDIR source=lib/env.sh
 source "$(dirname "$0")/lib/env.sh"
 
-usage() { sed -n '2,13s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+usage() { sed -n '2,15s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 
 cmd=${1:-}
 [[ -n $cmd ]] || usage
 shift
-slot=$(hm_default_slot) layout=a start=1 purge=0 tg=fake instance='' join=0
+slot=$(hm_default_slot) layout=a start=1 purge=0 tg=fake instance='' join=0 no_instance=0
 files=()
 while (($#)); do
   case $1 in
     --slot) slot=${2:?--slot needs a number}; shift 2 ;;
     --layout) [[ ${2:-} == browsers ]] || hm_die "--layout takes only 'browsers'"; layout=b; shift 2 ;;
     --no-start) start=0; shift ;;
+    --no-instance) no_instance=1; shift ;;
     --purge) purge=1; shift ;;
     --tg) [[ ${2:-} == real ]] || hm_die "--tg takes only 'real'"; tg=real; shift 2 ;;
     --instance) instance=${2:?--instance needs a name}; shift 2 ;;
@@ -232,7 +235,7 @@ cmd_up() {
   prepare_root
   secrets
   ((start && !running)) && start_services
-  [[ $layout == a ]] && write_instance
+  [[ $layout == a ]] && ((!no_instance)) && write_instance
   print_ports
   echo ready
 }

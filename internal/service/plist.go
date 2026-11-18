@@ -94,6 +94,10 @@ func (m *Manager) plist(svc string) ([]byte, error) {
 	b.WriteString("\t</array>\n")
 	b.WriteString("\t<key>RunAtLoad</key>\n\t<true/>\n\t<key>KeepAlive</key>\n\t<true/>\n")
 	b.WriteString("\t<key>ThrottleInterval</key>\n\t<integer>10</integer>\n")
+	if svc == Speech {
+		// whisper-server --convert writes its temporary WAV into the working directory; launchd's default is /
+		str("\t", "WorkingDirectory", inst.LogDir(svc))
+	}
 	str("\t", "StandardOutPath", filepath.Join(inst.LogDir(svc), "out.log"))
 	str("\t", "StandardErrorPath", filepath.Join(inst.LogDir(svc), "err.log"))
 	b.WriteString("\t<key>EnvironmentVariables</key>\n\t<dict>\n")

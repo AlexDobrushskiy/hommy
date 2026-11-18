@@ -148,13 +148,14 @@ func sendConfig(c *config.Config) (agentcli.Config, error) {
 	return out, nil
 }
 
-// hostKeyCmd: `hommy hub host-key add NAME`.
+// hostKeyCmd: `hommy hub host-key add|remove NAME`.
 func runHostKey(c *config.Config, args []string, stdout, stderr io.Writer) int {
-	if len(args) != 2 || args[0] != "add" {
-		fmt.Fprintln(stderr, "usage: hommy hub host-key add NAME")
+	const usage = "usage: hommy hub host-key add|remove NAME"
+	if len(args) != 2 || (args[0] != "add" && args[0] != "remove") {
+		fmt.Fprintln(stderr, usage)
 		return 2
 	}
-	name := args[1]
+	verb, name := args[0], args[1]
 	if config.SanitizeHostName(name) != name {
 		fmt.Fprintf(stderr, "host name %q: want [a-z0-9-], 1–32 chars\n", name)
 		return 2
@@ -166,8 +167,11 @@ func runHostKey(c *config.Config, args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	keys := secret.HostKeys(cur)
+	if verb == "remove" {
+		return removeHostKey(c, keys, name, stdout, stderr)
+	}
 	if _, ok := keys[name]; ok {
-		fmt.Fprintf(stderr, "host %s already has a key\n", name)
+		fmt.Fprintf(stderr, "host %s already has a key: hommy hub host-key remove %s, then add it again\n", name, name)
 		return 3
 	}
 	k, err := secret.NewKey()
@@ -186,6 +190,32 @@ func runHostKey(c *config.Config, args []string, stdout, stderr io.Writer) int {
 	if l := c.Get("HUB_LISTEN"); strings.HasPrefix(l, "127.") || strings.HasPrefix(l, "localhost") {
 		fmt.Fprintf(stderr, "the hub listens on %s only: for another Mac, hommy config set HUB_LISTEN <this Mac's LAN address>:%s\n", l, c.Port(0))
 	}
+	if serviceLoaded(c, "hub") {
+		if err := newManager(c, io.Discard).Restart("hub"); err != nil {
+			fmt.Fprintln(stderr, "restart hub:", err)
+			return 1
+		}
+	}
+	return 0
+}
+
+// removeHostKey drops a host's key from hub-host-keys; the hub restarts so the
+// host is refused from then on. This Mac's own host cannot be removed.
+func removeHostKey(c *config.Config, keys map[string]string, name string, stdout, stderr io.Writer) int {
+	if _, ok := keys[name]; !ok {
+		fmt.Fprintf(stderr, "host %s has no key\n", name)
+		return 3
+	}
+	if name == c.Get("HOST_NAME") {
+		fmt.Fprintf(stderr, "host %s is this Mac's own host: its key stays (hommy service uninstall --purge removes it)\n", name)
+		return 3
+	}
+	delete(keys, name)
+	if err := store(c).Set(secret.HubHostKeys, secret.FormatHostKeys(keys)); err != nil {
+		fmt.Fprintln(stderr, "keychain:", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "removed the key of host %s\n", name)
 	if serviceLoaded(c, "hub") {
 		if err := newManager(c, io.Discard).Restart("hub"); err != nil {
 			fmt.Fprintln(stderr, "restart hub:", err)

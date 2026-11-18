@@ -89,7 +89,8 @@ func TestTgRealAlwaysPassesTheTestBot(t *testing.T) {
 	} {
 		os.Remove(record)
 		cmd := exec.Command("../../../scripts/tg-real.sh", c.args...)
-		cmd.Env = []string{"PATH=" + stubDir + ":/usr/bin:/bin", "HOME=" + t.TempDir(), "HOMMY_TEST_BOT=" + c.bot}
+		cmd.Env = []string{"PATH=" + stubDir + ":/usr/bin:/bin", "HOME=" + t.TempDir(), "HOMMY_TEST_BOT=" + c.bot,
+			"HOMMY_SCRATCH_BASE=" + t.TempDir(), "HOMMY_SLOT=0"}
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("%v: %v %s", c.args, err, out)
 		}
@@ -97,5 +98,61 @@ func TestTgRealAlwaysPassesTheTestBot(t *testing.T) {
 		if strings.TrimSpace(string(got)) != c.want {
 			t.Fatalf("CLI argv %q, want %q", got, c.want)
 		}
+	}
+}
+
+// TestTgRealReplyWaitStartsAfterTheLastSeen: like the fake, `wait --for reply` without --since starts after the newest
+// message the tester saw (a send, a read, a reply wait), so a reply that lands before the wait is not missed.
+func TestTgRealReplyWaitStartsAfterTheLastSeen(t *testing.T) {
+	stubDir, base := t.TempDir(), t.TempDir()
+	record, reply := filepath.Join(stubDir, "called"), filepath.Join(stubDir, "reply.json")
+	stub := "#!/bin/sh\necho \"$@\" >" + record + "\ncat " + reply + "\n"
+	if err := os.WriteFile(filepath.Join(stubDir, "telegram-agent-cli"), []byte(stub), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	const bot = "@hommy_test_abc123_bot"
+	call := func(cliOut string, args ...string) string {
+		t.Helper()
+		if err := os.WriteFile(reply, []byte(cliOut), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		cmd := exec.Command("../../../scripts/tg-real.sh", args...)
+		cmd.Env = []string{"PATH=" + stubDir + ":/usr/bin:/bin", "HOME=" + t.TempDir(), "HOMMY_TEST_BOT=" + bot,
+			"HOMMY_SCRATCH_BASE=" + base, "HOMMY_SLOT=3"}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("%v: %v %s", args, err, out)
+		}
+		got, _ := os.ReadFile(record)
+		return strings.TrimSpace(string(got))
+	}
+	waitOut := func(ids ...string) string {
+		return `{"schema_version":"1","ok":true,"data":{"wait":{"for":"reply","message":{"id":` + ids[0] +
+			`},"messages":[{"id":` + strings.Join(ids, `},{"id":`) + `}]}}}`
+	}
+	steps := []struct {
+		out  string
+		args []string
+		want string
+	}{
+		{`{"ok":true,"data":{}}`, []string{"wait", "--for", "reply"}, "e2e wait --for reply --chat " + bot},
+		{`{"ok":true,"data":{"sent":{"id":41}}}`, []string{"send", "text", "hi"}, "e2e send text hi --chat " + bot},
+		{waitOut("42", "43"), []string{"wait", "--for", "reply"}, "e2e wait --for reply --since 41 --chat " + bot},
+		{waitOut("44"), []string{"wait", "--for=reply", "--timeout", "5"},
+			"e2e wait --for=reply --timeout 5 --since 43 --chat " + bot},
+		{`{"ok":true,"data":{"wait":{"for":"edit","message":{"id":90}}}}`, []string{"wait", "--for", "edit"},
+			"e2e wait --for edit --chat " + bot},
+		{`{"ok":true,"data":{"messages":[{"id":45},{"id":46}]}}`, []string{"read", "messages"},
+			"e2e read messages --chat " + bot},
+		{`{"ok":true,"data":{}}`, []string{"wait", "--for", "reply", "--since", "7"},
+			"e2e wait --for reply --since 7 --chat " + bot},
+		{`{"ok":true,"data":{}}`, []string{"wait", "--for", "reply"}, "e2e wait --for reply --since 46 --chat " + bot},
+	}
+	for i, s := range steps {
+		if got := call(s.out, s.args...); got != s.want {
+			t.Fatalf("step %d: CLI argv %q, want %q", i, got, s.want)
+		}
+	}
+	if b, err := os.ReadFile(filepath.Join(base, "hm-s3", "run", "tgreal.seen")); err != nil || string(b) != bot+" 46\n" {
+		t.Fatalf("state file %q, %v", b, err)
 	}
 }

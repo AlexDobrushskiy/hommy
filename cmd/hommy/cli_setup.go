@@ -7,9 +7,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"os/signal"
+	"strings"
 	"time"
 
+	"github.com/AlexDobrushskiy/hommy/internal/agterm"
 	"github.com/AlexDobrushskiy/hommy/internal/config"
 	"github.com/AlexDobrushskiy/hommy/internal/doctor"
 	"github.com/AlexDobrushskiy/hommy/internal/setup"
@@ -31,11 +34,11 @@ func probes(c *config.Config) doctor.Probes {
 func runDoctor(c *config.Config, args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	fs.Bool("deep", false, "add live speech round trips (phase 05)")
+	deep := fs.Bool("deep", false, "add live speech round trips (transcribe a sample, synthesize ok)")
 	if fs.Parse(args) != nil || fs.NArg() > 0 {
 		return 2
 	}
-	d := doctor.Doctor{Cfg: c, P: probes(c)}
+	d := doctor.Doctor{Cfg: c, P: probes(c), Deep: *deep}
 	if doctor.Print(stdout, d.Run(context.Background())) {
 		return 1
 	}
@@ -59,6 +62,11 @@ func runSetup(c *config.Config, g globals, args []string, stdin io.Reader, stdou
 	fs.StringVar(&o.WhisperModel, "whisper-model", "", "large-v3-turbo (default), small or medium")
 	fs.StringVar(&o.ClaudeBin, "claude-bin", "", "path of claude (default: found on PATH)")
 	fs.BoolVar(&o.NoPairWait, "no-pair-wait", false, "skip pairing (hommy pair later)")
+	fs.StringVar(&o.PluginSource, "plugin-source", "", "the hommy plugin marketplace: a local path or owner/repo (default "+setup.DefaultPluginSource+")")
+	fs.BoolVar(&o.SeedContext, "seed-context", false, "open an agterm session that runs the retainer interview into the vault")
+	fs.BoolVar(&o.DryRun, "dry-run", false, "with --seed-context: print the session command and first message only")
+	fs.StringVar(&o.AgentCommand, "agent-command", "", "what agent sessions run (default: CLAUDE_BIN)")
+	fs.StringVar(&o.AgtermWorkspace, "agterm-workspace", "", "the agterm workspace of agent sessions (default hommy)")
 	fs.StringVar(&o.Join, "join", "", "host-only install joining the hub at this ws:// URL")
 	fs.StringVar(&o.Name, "name", "", "this host's name (--join)")
 	fs.BoolVar(&o.KeyStdin, "key-stdin", false, "read the host key from stdin (--join)")
@@ -81,7 +89,21 @@ func runSetup(c *config.Config, g globals, args []string, stdin io.Reader, stdou
 	m := newManager(c, stdout)
 	e := setup.Env{
 		Cfg: c, Store: store(c), In: stdin, Out: stdout, Probes: probes(c),
-		Install: m.InstallRestart,
+		Install: func(restart bool, names ...string) (int, error) {
+			before := m.Changes
+			err := m.InstallRestart(restart, names...)
+			return m.Changes - before, err
+		},
+		Exec:          execCmd,
+		PrepareSpeech: func(ctx context.Context) (int, error) { return setup.LocalSpeech(ctx, c, stdout) },
+		Warm:          func(ctx context.Context) error { return setup.Warm(ctx, c, stdout) },
+		NewSession: func(ctx context.Context, so agterm.NewSessionOpts) (string, error) {
+			ctl, err := agterm.NewExecCtl()
+			if err != nil {
+				return "", err
+			}
+			return ctl.NewSession(ctx, so)
+		},
 		Pair: func(ctx context.Context) error {
 			cl, err := hubClient(c)
 			if err != nil {
@@ -134,4 +156,17 @@ func waitReady(ctx context.Context, c *config.Config, hubRole bool) error {
 		case <-time.After(500 * time.Millisecond):
 		}
 	}
+}
+
+// execCmd runs a setup helper command (≤ 15 min: a plugin install clones from GitHub, the browsers' install.sh runs
+// npm and its smoke test) and returns its combined output.
+func execCmd(ctx context.Context, stdin, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Minute)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, name, args...)
+	if stdin != "" {
+		cmd.Stdin = strings.NewReader(stdin)
+	}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
 }

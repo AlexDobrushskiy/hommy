@@ -1,6 +1,6 @@
 #!/bin/bash
-# The vault template in a folder, until `hommy vault` (phase 05) does this from the binary.
-#   scripts/vault.sh init <dir>                                   the template tree (vault-template/ minus embed.go)
+# Test-side vault helpers. `init` is the product's own `hommy vault init` (this checkout's bin/hommy, built if missing).
+#   scripts/vault.sh init <dir>                                   = bin/hommy vault init <dir>: the embedded template
 #                                                                  into <dir>, which must be empty or absent (exit 3)
 #   scripts/vault.sh add-place <vault> <name> <url> [--kind K] [--notes N]
 #                                                                  a row `| name | kind | url | notes |` in
@@ -13,19 +13,8 @@ die() { echo "vault: $1" >&2; exit "${2:-1}"; }
 
 cmd_init() {
   [[ $# -eq 1 ]] || usage
-  local dir=$1 tmp
-  if [[ -e $dir ]]; then
-    [[ -d $dir ]] || die "$dir is not a directory" 3
-    [[ -z $(ls -A "$dir") ]] || die "$dir is not empty" 3
-  fi
-  mkdir -p "$dir"
-  tmp=$(mktemp -d)
-  # every template file except Go sources (embed.go, tests)
-  (cd "$ROOT/vault-template" && find . -type f ! -name '*.go' ! -name '.DS_Store' -print0 | tar -c --null -T - -f -) |
-    tar -x -C "$tmp" -f -
-  cp -R "$tmp/." "$dir/"
-  rm -rf "$tmp"
-  echo "vault: initialized $(cd "$dir" && pwd -P) ($(find "$dir" -type f | wc -l | tr -d ' ') files)"
+  [[ -x $ROOT/bin/hommy ]] || "$ROOT/scripts/dev-build.sh" >/dev/null
+  exec "$ROOT/bin/hommy" vault init "$1"
 }
 
 cmd_add_place() {

@@ -26,7 +26,12 @@ need_mutable() {
   (($1 >= 1)) || hm_die "slot 0 is the phase checkout: not a workslot"
 }
 is_worktree() { git -C "$MAIN" worktree list --porcelain | grep -qxF "worktree $(slot_dir "$1")"; }
-branch_of() { git -C "$(slot_dir "$1")" symbolic-ref --quiet --short HEAD 2>/dev/null || echo "(detached)"; }
+# The full ref, not --short: a same-named tag makes --short print heads/<b>, which `git branch -D` can't find.
+branch_of() {
+  local ref
+  ref=$(git -C "$(slot_dir "$1")" symbolic-ref --quiet HEAD 2>/dev/null) || { echo "(detached)"; return 0; }
+  echo "${ref#refs/heads/}"
+}
 state_of() {
   if (($1 == 0)); then echo phase; elif [[ -e $(slot_dir "$1") ]]; then echo taken; else echo free; fi
 }
@@ -104,7 +109,7 @@ cmd_release() {
     HOMMY_SLOT=$n "$HM_REPO/scripts/test-env.sh" down --slot "$n" --purge >/dev/null || hm_die "slot $n: test-env down failed"
   fi
   git -C "$MAIN" worktree remove --force "$d"
-  [[ $b == "(detached)" ]] || git -C "$MAIN" branch -q -D "$b"
+  [[ $b == "(detached)" ]] || git -C "$MAIN" branch -q -D "$b" # a bare name: git branch only looks in refs/heads
   git -C "$MAIN" worktree prune
   echo "slot $n released: worktree and branch $b removed; free"
 }

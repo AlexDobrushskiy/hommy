@@ -132,6 +132,10 @@ func TestPlistRendering(t *testing.T) {
 	if !strings.Contains(string(sp), want) {
 		t.Errorf("speech plist:\n%s", sp)
 	}
+	// whisper-server --convert writes temp files into the working directory: never launchd's /
+	if !strings.Contains(string(sp), "<key>WorkingDirectory</key>\n\t<string>"+filepath.Join(r.inst.StateDir(), "speech")+"</string>") {
+		t.Errorf("speech plist without its WorkingDirectory:\n%s", sp)
+	}
 	// default instance: no --instance, no HOMMY_INSTANCE; no secret-shaped value anywhere
 	d := newRig(t, "", "off")
 	b, _ := d.m.plist(Host)

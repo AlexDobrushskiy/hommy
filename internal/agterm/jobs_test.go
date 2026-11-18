@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -733,5 +735,28 @@ func TestPeekScreenKeepsComposer(t *testing.T) {
 	}
 	if strings.HasSuffix(r.Text, "\n") || strings.Contains(r.Text, " \n") {
 		t.Fatalf("trailing blanks kept: %q", r.Text)
+	}
+}
+
+// The command line agterm runs hands the extra arguments (a first prompt with quotes, $ and newlines) to the agent
+// unchanged, after the permission flag.
+func TestAgentCommandLineArgsQuoting(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("macOS: /bin/zsh")
+	}
+	dir := t.TempDir()
+	agent := filepath.Join(dir, "agent")
+	os.WriteFile(agent, []byte("#!/bin/sh\nfor a; do printf '[%s]\\n' \"$a\"; done\nexit 0\n"), 0o755)
+	msg := "it's \"quoted\" $HOME `x`\nline two"
+	line := AgentCommandLineArgs(agent, dir, "", true, msg)
+	cmd := exec.Command("/bin/sh", "-c", line)
+	cmd.Env = []string{"HOME=" + dir, "PATH=/usr/bin:/bin"}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%v: %s", err, out)
+	}
+	want := "[--dangerously-skip-permissions]\n[" + msg + "]\n"
+	if !strings.Contains(string(out), want) {
+		t.Fatalf("got %q, want %q", out, want)
 	}
 }

@@ -87,7 +87,10 @@ changes nothing answers 400 "message is not modified"; pinning sends the bot its
 `scripts/tg-real.sh` command asks for the owner's OK (a guard hook): the overseer approves them; the maintainer
 authorized writes to the test bot. It always passes `--chat` with the test bot from `HOMMY_TEST_BOT` or
 `~/.config/hommy-test/test-bot` (`@hommy_test_<6 chars>_bot`, never the CLI's default chat) and refuses (exit 2, before
-any call) when none is configured or a fake-only verb or flag (`--from`, `--chat`) is given. `scripts/tg.sh` never reaches real Telegram (with `TG=real` it exits 2 and points
+any call) when none is configured or a fake-only verb or flag (`--from`, `--chat`) is given. As with the fake,
+`wait --for reply` starts after the newest message you have seen (your last send, `read messages`, or reply wait;
+kept in `/tmp/hm-s<N>/run/tgreal.seen` and passed as `--since` unless you give one), so a separate wait does not miss
+a reply that landed before it started. `scripts/tg.sh` never reaches real Telegram (with `TG=real` it exits 2 and points
 here), so fake rows run without prompts.
 
 ## Speech
@@ -150,7 +153,7 @@ line (setup's, a row's `config set`).
 | config (0600, `KEY=VALUE`) | `/tmp/hm-s0/home/.config/hommy-test/hommy.env`: `PORT_BASE=4710`, `TELEGRAM_API_URL=http://127.0.0.1:4711`, `WHISPER_ENDPOINTS=fake\|http://127.0.0.1:4712/v1\|whisper`, `TTS_URL=http://127.0.0.1:4712/v1`, `SPEECH=external`, `AGTERM_WORKSPACE=hm-test-s0`, `CLAUDE_BIN=/tmp/hm-s0/bin/claude-stub`, `AGENT_COMMAND=<app>/scripts/claude-session.sh --slot 0 interactive` |
 | bot token | scratch keychain, service `hommy-test`, account `telegram-bot-token`: the fake's token |
 | vault | `/tmp/hm-s0/vault`, copied from `e2e/fixtures/vault-min/` when it has no `CLAUDE.md` |
-| Claude hooks | `/tmp/hm-s0/claude-hooks.json`: SessionStart, UserPromptSubmit, Stop, Notification → `/tmp/hm-s0/home/.local/share/hommy-test/bin/hommy --instance test hook …`; `claude-session.sh interactive` passes it with `--settings` |
+| Claude hooks | one source per session: the scratch HOME's installed `hommy@hommy` plugin (`scripts/plugins-env.sh`, `install.sh`) when it is installed; else `/tmp/hm-s0/claude-hooks.json` (SessionStart, UserPromptSubmit, Stop, Notification → `/tmp/hm-s0/home/.local/share/hommy-test/bin/hommy --instance test hook …`), which `claude-session.sh interactive` then passes with `--settings` |
 
 `up --tg real` (`tg=real` rows) copies the build Mac's `hommy-test-bot-token` into the instance's
 `telegram-bot-token` instead (over stdin, never shown; refused when that keychain is locked or lacks the item) and
@@ -261,7 +264,8 @@ session's Bash environment unless the user set it), `telegram-guard` (no `telegr
 ## Vault
 
 ```sh
-scripts/vault.sh init /tmp/hm-s2/vault          # the template (vault-template/ minus embed.go); exit 3 `not empty`
+SX bin/hommy vault init /tmp/hm-s2/vault        # the embedded template; exit 3 `not empty` (scripts/vault.sh init = the same)
+SX bin/hommy vault add-recipes /tmp/hm-s2/vault # the recipes and missing template files, never overwriting; prints the routing rows
 scripts/vault-lint.sh /tmp/hm-s2/vault          # `ok`, or one `vault-lint: <path>: <problem>` line each (exit 1)
 scripts/vault.sh add-place /tmp/hm-s2/vault "Barbearia Exemplo" http://127.0.0.1:4735/ [--kind barber] [--notes …]
 ```
@@ -332,3 +336,137 @@ CI: the `leak` job scans the tree and the pushed commits with the scanner, `.git
 `LEAK_IDENTIFIERS`; the `identities` job checks every pushed commit's author and committer email. Read a run with
 `gh run list -R AlexDobrushskiy/hommy --branch <branch> --limit 1 --json databaseId,conclusion` and
 `gh run view <id> --log-failed`. A false positive goes to the overseer as `#N (category) in <path>`.
+
+## Installer and VM
+
+The release snapshot, the artifacts bundle `install.sh --source DIR` installs from, and the one Tart VM of 05's VM
+rows (E7, E8, E12). Tart is the pinned `scripts/tools.sh` copy; the image
+`ghcr.io/cirruslabs/macos-golden-gate-vanilla:latest` must already be in Tart's cache (`vm.sh` never pulls it and
+never deletes it). One hommy VM at a time; `create` refuses (exit 3) below 60 GB free.
+
+```sh
+gh api repos/AlexDobrushskiy/homebrew-tap/commits/HEAD --jq .sha   # E6: the same sha before and after
+scripts/release-snapshot.sh            # dist/: hommy_<V>_darwin_arm64.tar.gz, checksums.txt, hommy.rb; prints version + archive
+scripts/vm-artifacts.sh                # .dev/artifacts/ (below); --version 0.1.1-dev for a bumped build (E5), --out DIR
+```
+
+`.dev/artifacts/`: `dist/` (the snapshot), `hommy` + `VERSION` (the binary from the archive, for `--hommy-binary`),
+`hommy-browsers.tar.gz` (top dir `hommy-browsers/`: a full clone of `../hommy-browsers` or `HOMMY_BROWSERS_SRC` with its
+uncommitted work committed on top; each bundle's HEAD descends from the previous bundle's, kept in
+`.dev/hb-lineage.git`, so `git pull --ff-only` from a newer bundle fast-forwards), `app/` (this checkout's tracked +
+untracked-not-ignored files: plugin marketplace, fixtures), `install.sh`, `Brewfile`, `fakes/hommy-e2e`. The cask's
+`url` is the future release URL: the installer's local tap points it at `DIR/dist/`.
+
+`scripts/vm.sh`: `create|ssh|copy|run|delete|ip|status NAME`. `run NAME [--stdin] -- CMD…` runs CMD in the VM's HOME
+under `zsh -l` with `PATH=/opt/homebrew/bin:$HOME/.local/bin:…` and exits with CMD's code; CMD's stdin is empty unless
+`--stdin`. `ssh NAME [SSH-OPTS…] [-- CMD…]` passes stdin through. Steps marked **(non-user)** are done by the harness,
+not by a user, and each is recorded with a timestamp in `.dev/vm/NAME/steps.log`:
+
+- **(non-user)** `create`: a throwaway ed25519 key and known_hosts in `.dev/vm/NAME/` (the image's `admin`/`admin`
+  password is typed once, by `expect`, to install the key); `~/.claude.json` seeded with
+  `{"hasCompletedOnboarding": true}`; run's helpers in the VM's `~/.hommy-vm/`.
+- **(non-user)** `create`: agterm's two first-run prompts answered ahead of its first launch: `settings.json`
+  `{"welcomeShown": true}` (the modal Welcome alert blocks every `agtermctl` reply) and `defaults write com.umputun.agterm
+  SUEnableAutomaticChecks -bool false` (with Sparkle's update prompt up, launch 2 opens no window and binds no socket).
+- **(non-user)** every `run` and `ssh`: `security unlock-keychain` of the VM's login keychain.
+- **(non-user)** every `run`, when the build Mac's default keychain is unlocked (checked without a dialog) and holds
+  `hommy-test-claude-token`: `CLAUDE_CODE_OAUTH_TOKEN` for CMD and `launchctl setenv` in the VM's GUI domain (agterm
+  and its sessions). The token goes over ssh's stdin only; it is in the VM until `delete`. Locked or missing: `token
+  env: not set (…)` in `steps.log`, and CMD runs without it.
+
+### Build-Mac rows (05-E1…E6, E9…E11)
+
+The installer in a fresh scratch HOME of slot 0: `test-env.sh up --no-instance` starts the fakes and seeds the scratch
+HOME, keychain (the fake's bot token) and an empty vault folder, but writes no instance: `install.sh` does. `I` is the
+spec's command; `H` runs the build `I` installed (`HOMMY_BIN`), not `bin/hommy`:
+
+```sh
+scripts/live-guard.sh snapshot
+scripts/test-env.sh down --purge; scripts/test-env.sh up --no-instance      # ends with `ready`
+scripts/vm-artifacts.sh                                                      # .dev/artifacts (below)
+I() { scripts/sx.sh ./install.sh --source .dev/artifacts --instance test --port-base 4710 --whisper-model small \
+  --brew-check-only --hommy-binary .dev/artifacts/hommy --non-interactive --vault /tmp/hm-s0/vault \
+  --plugin-source "$PWD" --telegram-api http://127.0.0.1:4711 --no-pair-wait --claude-bin /tmp/hm-s0/bin/claude-stub \
+  --agent-command "$PWD/scripts/claude-session.sh interactive" --agterm-workspace hm-test-s0; }
+export HOMMY_BIN=$PWD/.dev/artifacts/hommy                                   # H = scripts/hm.sh
+I                                  # E1: `[n/9] …` lines, then `install: N changes`; the first run downloads the whisper
+                                   # model (~0.5 GB) and Kokoro's weights (setup warms both), a few minutes
+scripts/hm.sh pair --no-wait       # PAIR: `code: K`, then
+scripts/tg.sh send text "/start K" --from owner --wait reply --timeout 30
+scripts/hm.sh doctor; echo $?      # all ✓ (`!` = optional tools), exit 0
+```
+
+- E2's record: `shasum` of `/tmp/hm-s0/home/.config/hommy-test/{hommy.env,llama-swap.yaml}`,
+  `/tmp/hm-s0/home/.local/share/hommy-test-browsers/config.env` and `/tmp/hm-s0/home/Library/LaunchAgents/dev.hommy.test*.plist`,
+  plus `launchctl list | awk '$3 ~ /^dev\.hommy\.test\./ {print $3, $1}'` (label, PID); diff it before and after `I`.
+- E3: `scripts/observe.sh prompts` shows each run's prompt: the voice note's is `[voice message, transcribed]⏎Hello.`
+  (the hub log never holds message text).
+- E5: `scripts/vm-artifacts.sh --version 0.1.1-dev`, then `I` (stage 6 `upgraded`); `scripts/hm.sh version`.
+- E9 (`claude=real`) needs the default target back after E3/E10's `/target vault@…`:
+  `scripts/tg.sh send text "/target new@$(scripts/hm.sh config get HOST_NAME):/tmp/hm-s0/vault:interactive" --wait reply`.
+  Then send the row's text and `scripts/tg.sh wait --for reply --timeout 180` three times (🆕 line, `pong`, the voice
+  note: `"media":{"type":"voice"…}`). The session's id and its claude's `HOME`: "Test instance" above. Close the
+  session afterwards: `agtermctl session close --target <id>`.
+- E10: `scripts/hook-probe.sh turn --session probe-1 --msg M --text ok` prints one line per hook run (`exit 0, output 0
+  bytes, <s> s`) and exits 1 if any run failed, printed or took 5 s; the spool is
+  `/tmp/hm-s0/home/.local/state/hommy-test/host/hookspool/`.
+- A lane Chrome a row opened closes with the browsers' MCP server (`scripts/test-env.sh down` stops it);
+  `SX /tmp/hm-s0/home/.local/share/hommy-test-browsers/browser-reaper --json` lists it as `managed` meanwhile.
+- End: `scripts/test-env.sh down` (boots out every `dev.hommy.test.*` agent, the browsers' too), `scripts/live-guard.sh check`.
+
+### VM rows
+
+E7, E8, E12 (from `app/`, in this order):
+
+```sh
+df -g ~ | awk 'NR == 2 {print $4}'                 # E12's baseline: free GB before the VM
+scripts/vm-artifacts.sh
+scripts/vm.sh create hommy-05                      # prints the IP; `scripts/vm.sh status hommy-05` = running <ip>
+scripts/vm.sh run hommy-05 -- claude --version || echo no-claude   # fresh: no claude
+scripts/vm.sh copy hommy-05 .dev/artifacts/ artifacts               # → ~/artifacts
+scripts/vm.sh copy hommy-05 .dev/artifacts/install.sh install.sh    # → ~/install.sh, so ./install.sh resolves (run's cwd is HOME)
+
+# (non-user) the VM's fake Telegram from the artifacts on the VM's 127.0.0.1:4711, and its bot token in the VM's
+# login keychain (service hommy, account telegram-bot-token) through `security -i` on stdin
+scripts/vm.sh run hommy-05 --stdin -- /bin/zsh -s <<'EOF'
+mkdir -p ~/.hommy-vm/faketg && cd ~/.hommy-vm/faketg
+[[ -s token ]] || (umask 077 && print "1000001:hommy-fake-vm-$(openssl rand -hex 8)" > token)
+old=$(lsof -t -iTCP:4711 -sTCP:LISTEN) && { kill $old; sleep 0.5; }   # a restart replaces the running fake
+nohup ~/artifacts/fakes/hommy-e2e faketg --addr 127.0.0.1:4711 --token-file token --state-file ids </dev/null >>log 2>&1 &!
+for i in {1..50}; do curl -fsS -m 1 http://127.0.0.1:4711/_fake/health 2>/dev/null && break; sleep 0.2; done
+print -r -- "add-generic-password -U -s hommy -a telegram-bot-token -w \"$(<token)\"" | security -i >/dev/null
+security find-generic-password -s hommy -a telegram-bot-token >/dev/null && echo "bot token: seeded"
+EOF
+# → ok, bot token: seeded
+
+scripts/vm.sh run hommy-05 -- ./install.sh --source artifacts --non-interactive --telegram-api http://127.0.0.1:4711 --no-pair-wait   # E7
+scripts/vm.sh run hommy-05 -- tail -n 30 .local/state/hommy/install.log
+
+# Pairing through the VM's fake: the fake's control API on the build Mac's 127.0.0.1:14711 (not 4711: slot 0's own
+# fake may hold it), then scripts/tg.sh against it
+scripts/vm.sh ssh hommy-05 -L 14711:127.0.0.1:4711 -N -f -o ExitOnForwardFailure=yes
+scripts/vm.sh run hommy-05 -- hommy pair --no-wait                                     # first line `code: K`
+TG_URL=http://127.0.0.1:14711 scripts/tg.sh send text "/start K" --from owner --wait reply --timeout 30
+scripts/vm.sh run hommy-05 -- hommy doctor; echo "exit $?"                             # all ✓, exit 0
+kill $(lsof -t -iTCP:14711 -sTCP:LISTEN)                                              # the forward
+
+# E8
+git ls-files | xargs file | grep -ciE 'Mach-O|ELF'                                     # 0
+scripts/vm.sh run hommy-05 -- grep -c 'source=' .local/state/hommy/install.log         # one per installed tool
+scripts/vm.sh run hommy-05 -- grep 'source=' .local/state/hommy/install.log            # each names its origin
+
+# E12
+scripts/vm.sh delete hommy-05
+.dev/tools/tart list                               # only the cached image (OCI rows) remains
+df -g ~ | awk 'NR == 2 {print $4}'                 # within 2 GB of the baseline
+```
+
+In the VM, Homebrew's installer runs non-interactively (the image has passwordless sudo). **On a real Mac the
+one-liner hands Homebrew's installer the terminal** (`/dev/tty`, even under `curl … | bash`): it asks for the account
+password and a RETURN. A `--non-interactive` run gives Homebrew `NONINTERACTIVE=1` (`sudo -n`), so on a Mac without
+Homebrew it needs cached sudo credentials (`sudo -v` first).
+
+The one-liner's shape on a terminal (review r1 check; one VM): move `/etc/sudoers.d/admin-nopasswd` aside in the VM
+(sudo then wants the password, as on a real Mac), then drive `scripts/vm.sh ssh NAME -tt -- /bin/zsh -lc 'cat
+artifacts/install.sh | bash -s -- --source artifacts --telegram-api http://127.0.0.1:4711 --no-pair-wait'` with
+`expect` answering `Password:` (`admin`) and Homebrew's `… any other key to abort` (RETURN).

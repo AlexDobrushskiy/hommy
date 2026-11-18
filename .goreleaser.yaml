@@ -1,0 +1,63 @@
+# GoReleaser v2 (master spec §8.3). Local snapshots only until the public go: scripts/release-snapshot.sh.
+# Never needs GITHUB_TOKEN and never touches the tap: release disabled, the cask is written to dist/ only.
+version: 2
+project_name: hommy
+
+builds:
+  - id: hommy
+    main: ./cmd/hommy
+    binary: hommy
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin]
+    goarch: [arm64]
+    flags: [-trimpath]
+    ldflags:
+      - -s -w -X github.com/AlexDobrushskiy/hommy/internal/version.Version={{ .Version }}
+
+archives:
+  - id: hommy
+    ids: [hommy]
+    formats: [tar.gz]
+    name_template: "hommy_{{ .Version }}_darwin_arm64"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: '{{ if index .Env "HOMMY_VERSION" }}{{ index .Env "HOMMY_VERSION" }}{{ else }}{{ incpatch .Version }}-dev{{ end }}'
+
+changelog:
+  disable: true
+
+release:
+  disable: true
+
+homebrew_casks:
+  - name: hommy
+    ids: [hommy]
+    binaries: [hommy]
+    homepage: https://github.com/AlexDobrushskiy/hommy
+    description: Voice-note errands from Telegram, run by Claude Code on your Mac
+    license: MIT
+    skip_upload: true
+    # The release asset of the public go. A snapshot install (install.sh --source) points its local tap's copy at
+    # the archive in DIR/dist/ instead.
+    url:
+      template: "https://github.com/AlexDobrushskiy/hommy/releases/download/{{ .Tag }}/{{ .ArtifactName }}"
+    repository:
+      owner: AlexDobrushskiy
+      name: homebrew-tap
+    commit_author:
+      name: AlexDobrushskiy
+      email: 4486815+AlexDobrushskiy@users.noreply.github.com
+    hooks:
+      post:
+        # Homebrew's declarative postflight_steps; {{staged_path}} is Homebrew's token, escaped from GoReleaser.
+        install_steps: |
+          on_macos do
+            run "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "{{ "{{staged_path}}" }}/hommy"]
+          end

@@ -1,6 +1,6 @@
 // Package setup is `hommy setup`: preflight, instance config, bot token, vault,
 // permissions, speech URLs, keys, services, pairing and a final doctor
-// (master spec §4.6; phase 02 builds steps 1–8, 10 and 12).
+// (master spec §4.6): steps 1–12; every run ends with `setup: N changes`.
 package setup
 
 import (
@@ -20,22 +20,27 @@ import (
 	"github.com/AlexDobrushskiy/hommy/internal/config"
 	"github.com/AlexDobrushskiy/hommy/internal/doctor"
 	"github.com/AlexDobrushskiy/hommy/internal/secret"
+	"github.com/AlexDobrushskiy/hommy/internal/vault"
 )
 
 // Options are setup's flags.
 type Options struct {
-	NonInteractive bool
-	PortBase       string
-	HostName       string
-	TokenStdin     bool
-	TelegramAPI    string
-	Vault          string
-	Permissions    string // skip | ask | "" (keep)
-	Speech         string // local | external | off | "" (keep)
-	STTURL, TTSURL string
-	WhisperModel   string
-	ClaudeBin      string
-	NoPairWait     bool
+	NonInteractive  bool
+	PortBase        string
+	HostName        string
+	TokenStdin      bool
+	TelegramAPI     string
+	Vault           string
+	Permissions     string // skip | ask | "" (keep)
+	Speech          string // local | external | off | "" (keep)
+	STTURL, TTSURL  string
+	WhisperModel    string
+	ClaudeBin       string
+	NoPairWait      bool
+	PluginSource    string // the hommy marketplace: a path or owner/repo (default DefaultPluginSource)
+	SeedContext     bool   // step 11 without asking
+	AgentCommand    string // AGENT_COMMAND
+	AgtermWorkspace string // AGTERM_WORKSPACE
 	// --join: host-only install for another Mac.
 	Join      string // the hub's ws:// URL
 	Name      string // this host's name
@@ -55,9 +60,19 @@ type Env struct {
 	Out    io.Writer
 	Probes doctor.Probes
 	// Install is `hommy service install`; restart also restarts a loaded hub/host
-	// whose plist is unchanged (setup changed what they read at start).
-	Install func(restart bool, names ...string) error
-	Pair    func(ctx context.Context) error
+	// whose plist is unchanged (setup changed what they read at start). It
+	// reports how many things it changed.
+	Install func(restart bool, names ...string) (int, error)
+	// Exec runs a command (claude plugin …, the browsers' install.sh) with stdin;
+	// nil skips step 9's plugins.
+	Exec func(ctx context.Context, stdin, name string, args ...string) (string, error)
+	// PrepareSpeech is step 6 for SPEECH=local (LocalSpeech); Warm loads both
+	// models after the services are up. nil skips them.
+	PrepareSpeech func(ctx context.Context) (int, error)
+	Warm          func(ctx context.Context) error
+	// NewSession opens the context session (step 11).
+	NewSession func(ctx context.Context, o agterm.NewSessionOpts) (string, error)
+	Pair       func(ctx context.Context) error
 	// Ready waits for the hub and host to come up after install.
 	Ready func(ctx context.Context, hubRole bool) error
 	// Doctor runs the final checks; it returns the results.
@@ -72,6 +87,7 @@ type runner struct {
 	// what the daemons read at start: the config file as it was, and whether a secret changed
 	cfgBefore      []byte
 	secretsChanged bool
+	changes        int // files, secrets, services, plugins this run changed (`setup: N changes`)
 }
 
 // Run is `hommy setup`.
@@ -81,6 +97,13 @@ func Run(ctx context.Context, e Env, o Options) error {
 	join := o.Join != ""
 	if join && (o.Name == "" || !o.KeyStdin) {
 		return fmt.Errorf("%w: --join needs --name and --key-stdin", ErrUsage)
+	}
+	if o.DryRun {
+		// --seed-context --dry-run prints step 11's command and first message, nothing else
+		if !o.SeedContext {
+			return fmt.Errorf("%w: --dry-run goes with --seed-context", ErrUsage)
+		}
+		return r.seedContext(ctx)
 	}
 	steps := []struct {
 		name string
@@ -95,7 +118,9 @@ func Run(ctx context.Context, e Env, o Options) error {
 		{"speech", r.speech, false},
 		{"keys", r.keys, true},
 		{"services", r.services, true},
+		{"browsers and plugins", r.kit, true},
 		{"pairing", r.pairing, false},
+		{"context", r.seedContext, false},
 	}
 	for _, s := range steps {
 		if join && !s.join {
@@ -163,9 +188,10 @@ func (r *runner) agtermUp(ctx context.Context) error {
 	if _, err := r.Probes.Run(ctx, p, "version"); err == nil {
 		return nil
 	}
-	r.say("starting agterm …")
+	r.say("starting agterm … on its first launches agterm shows a Welcome window and asks whether to check for updates: answer both, then setup goes on")
 	r.Probes.Run(ctx, "/usr/bin/open", "-a", "agterm")
-	deadline := time.Now().Add(60 * time.Second)
+	// agterm's control socket answers only once those first-run dialogs are answered
+	deadline := time.Now().Add(3 * time.Minute)
 	for time.Now().Before(deadline) {
 		if _, err := r.Probes.Run(ctx, p, "version"); err == nil {
 			return nil
@@ -176,7 +202,7 @@ func (r *runner) agtermUp(ctx context.Context) error {
 		case <-time.After(time.Second):
 		}
 	}
-	return fmt.Errorf("agterm did not come up within 60 s: open -a agterm, then rerun hommy setup")
+	return fmt.Errorf("agterm did not answer within 3 min: answer its Welcome and update-check dialogs (open -a agterm), then rerun hommy setup")
 }
 
 // claudeBin resolves claude to an absolute path.
@@ -261,7 +287,8 @@ func (r *runner) configStep(context.Context) error {
 			return err
 		}
 	}
-	set := map[string]string{"PORT_BASE": r.o.PortBase, "HOST_NAME": r.o.HostName, "TELEGRAM_API_URL": r.o.TelegramAPI}
+	set := map[string]string{"PORT_BASE": r.o.PortBase, "HOST_NAME": r.o.HostName, "TELEGRAM_API_URL": r.o.TelegramAPI,
+		"AGENT_COMMAND": r.o.AgentCommand, "AGTERM_WORKSPACE": r.o.AgtermWorkspace}
 	if r.o.Join != "" {
 		set["HUB_URL"] = r.o.Join
 		set["HOST_NAME"] = r.o.Name
@@ -270,7 +297,7 @@ func (r *runner) configStep(context.Context) error {
 		// kept, so a renamed Mac keeps the name its host key is stored under
 		set["HOST_NAME"] = c.Get("HOST_NAME")
 	}
-	for _, k := range []string{"PORT_BASE", "HUB_URL", "HOST_NAME", "TELEGRAM_API_URL"} {
+	for _, k := range []string{"PORT_BASE", "HUB_URL", "HOST_NAME", "TELEGRAM_API_URL", "AGENT_COMMAND", "AGTERM_WORKSPACE"} {
 		if v := set[k]; v != "" {
 			if err := c.Set(k, v); err != nil {
 				return err
@@ -371,20 +398,30 @@ func (r *runner) vault(context.Context) error {
 	if fi, err := os.Stat(abs); err == nil && !fi.IsDir() {
 		return fmt.Errorf("%s is a file, not a folder", abs)
 	}
-	created := false
-	if _, err := os.Stat(abs); errors.Is(err, os.ErrNotExist) {
-		if err := os.MkdirAll(abs, 0o755); err != nil {
-			return err
-		}
-		created = true
-	}
 	if err := c.Set("VAULT_DIR", abs); err != nil {
 		return err
 	}
-	if created {
-		r.say("✓ vault %s (created)", abs)
+	// missing or empty → the template; an existing vault keeps every file and gets what it lacks
+	if n, err := vault.Init(abs); err == nil {
+		r.changes++
+		r.say("✓ vault %s (created from the template, %d files)", abs, n)
+	} else if !errors.Is(err, vault.ErrNotEmpty) {
+		return err
 	} else {
-		r.say("✓ vault %s (kept)", abs)
+		added, rows, err := vault.AddRecipes(abs)
+		if err != nil {
+			return err
+		}
+		if len(added) == 0 {
+			r.say("✓ vault %s (kept)", abs)
+		} else {
+			r.changes++
+			r.say("✓ vault %s (kept; added %s)", abs, strings.Join(added, ", "))
+			r.say("  route errands to the recipes: add these rows to your kernel's routing table if it lacks them:")
+			for _, row := range rows {
+				r.say("  %s", row)
+			}
+		}
 	}
 	if note := TCCNote(abs, c.Inst.Home, c.Inst.BinPath()); note != "" {
 		r.say("%s", note)
@@ -425,6 +462,7 @@ func (r *runner) permissions(context.Context) error {
 			return err
 		}
 		if changed {
+			r.changes++
 			r.say("✓ permissions skip (Claude's skip-permissions prompt turned off in %s)", filepath.Join(dir, "settings.json"))
 			return nil
 		}
@@ -471,7 +509,7 @@ func MergeSkipPrompt(path string, now time.Time) (bool, error) {
 
 // --- 6. speech (URLs only in 02) ---
 
-func (r *runner) speech(context.Context) error {
+func (r *runner) speech(ctx context.Context) error {
 	c := r.Cfg
 	mode := r.o.Speech
 	if mode == "" {
@@ -541,6 +579,13 @@ func (r *runner) speech(context.Context) error {
 				return err
 			}
 		}
+		if r.PrepareSpeech != nil {
+			n, err := r.PrepareSpeech(ctx)
+			if err != nil {
+				return err
+			}
+			r.changes += n
+		}
 	}
 	r.say("✓ speech %s", mode)
 	return nil
@@ -607,12 +652,26 @@ func (r *runner) services(ctx context.Context) error {
 		names = []string{"host"}
 	}
 	now, _ := os.ReadFile(r.Cfg.Path)
-	if err := r.Install(r.secretsChanged || string(now) != string(r.cfgBefore), names...); err != nil {
+	cfgChanged := string(now) != string(r.cfgBefore)
+	if cfgChanged {
+		r.changes++
+	}
+	if r.secretsChanged {
+		r.changes++
+	}
+	n, err := r.Install(r.secretsChanged || cfgChanged, names...)
+	if err != nil {
 		return err
 	}
+	r.changes += n
 	if r.Ready != nil {
 		if err := r.Ready(ctx, r.o.Join == ""); err != nil {
 			r.say("services: %v", err)
+		}
+	}
+	if r.o.Join == "" && r.Cfg.Get("SPEECH") == "local" && r.Warm != nil {
+		if err := r.Warm(ctx); err != nil {
+			r.say("! speech: %v (hommy doctor --deep shows it)", err)
 		}
 	}
 	return nil
@@ -671,6 +730,7 @@ func (r *runner) finish(ctx context.Context) error {
 			r.say("Next: hommy pair (then send your bot a text or a voice note)")
 		}
 	}
+	r.say("setup: %d changes", r.changes)
 	if red {
 		return errors.New("doctor found problems (see the fix lines above)")
 	}

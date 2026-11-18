@@ -300,3 +300,13 @@ func envOr(key, def string) string {
 	}
 	return def
 }
+
+// The lang_code values hommy sends for its default languages are ones mlx-audio's Kokoro accepts: its pipeline aliases
+// these ISO codes to Kokoro's own (en→a, es→e, fr→f, it→i, pt→p, hi→h), checked against the real server in 05.
+func TestLangCodeKokoroAliases(t *testing.T) {
+	for in, want := range map[string]string{"": "en", "EN": "en", "es": "es", "fr": "fr", "it": "it", "pt": "pt", " hi ": "hi"} {
+		if got := LangCode(in); got != want {
+			t.Errorf("LangCode(%q) = %q, want %q", in, got, want)
+		}
+	}
+}

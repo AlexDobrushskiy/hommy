@@ -217,10 +217,22 @@ func (c *ExecCtl) Type(ctx context.Context, s Session, text string) error {
 	return err
 }
 
-func (c *ExecCtl) NewSession(ctx context.Context, o NewSessionOpts) (string, error) {
-	args := []string{"session", "new", "--workspace-name", o.Workspace, "--create-workspace",
+func newSessionArgs(o NewSessionOpts) []string {
+	return []string{"session", "new", "--workspace-name", o.Workspace, "--create-workspace",
 		"--cwd", o.Cwd, "--name", o.Name, "--no-select", "--command", o.Command}
-	out, err := c.run(ctx, "", args...)
+}
+
+// NewSessionCommand is the agtermctl command line NewSession runs, shell-quoted (setup --dry-run prints it).
+func NewSessionCommand(o NewSessionOpts) string {
+	parts := []string{"agtermctl"}
+	for _, a := range newSessionArgs(o) {
+		parts = append(parts, shQuote(a))
+	}
+	return strings.Join(parts, " ")
+}
+
+func (c *ExecCtl) NewSession(ctx context.Context, o NewSessionOpts) (string, error) {
+	out, err := c.run(ctx, "", newSessionArgs(o)...)
 	if err != nil {
 		return "", err
 	}

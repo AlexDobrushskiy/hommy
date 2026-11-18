@@ -74,7 +74,7 @@ up --slot 1 --layout browsers`; `SX` = `scripts/sx.sh --slot 1`; `HB` = `SX /tmp
 | E1 | maintainer-only; the snapshot from task 1 | `gh repo view AlexDobrushskiy/hommy-browsers --json isPrivate`; `git log --max-parents=0 --format=%H main` and `git show --stat` of it; `../ops/src-record.sh check` | `isPrivate: true`; one root commit holding the whole engine; `unchanged` |
 | E2 | the PR branch | `scripts/leak-scan.sh --history`; `scripts/leak-scan.sh .`; `git log --format='%ae %ce' \| sort -u` | `0 hits` both; only the noreply address and `noreply@github.com`; no `sites/`, no `.png` under `captcha/data/bench` |
 | E3 | scratch HOME, no install | `HB/install.sh`; `HB/install.sh` | first exit 0, summary lists the created services; second exit 0, `changed: 0`, and `launchctl print` PIDs of every test service equal those after the first run |
-| E4 | E3 | `launchctl print gui/$UID/dev.hommy.test-s1.browsers.lanes \| grep 'state ='`; same for `identity`, `identity-a`; `M 4720 initialize {}`; `defaults read "$(HB/agent-chrome --print-app)/Contents/Info" CFBundleIdentifier` | `running` ×3; a JSON-RPC result with `serverInfo`; `dev.hommy.test-s1.agent-chrome` |
+| E4 | E3 | `launchctl print gui/$UID/dev.hommy.test-s1.browsers.lanes \| grep 'state ='`; same for `identity`, `identity-a`; `scripts/mcp-init.sh 4720`; `defaults read "$(HB/agent-chrome --print-app)/Contents/Info" CFBundleIdentifier` | `running` ×3; a JSON-RPC result with `serverInfo`; `dev.hommy.test-s1.agent-chrome` |
 | E5 | E3; `hommy-e2e static-site --port 4726` running | `M 4720 browser_navigate '{"url":"http://127.0.0.1:4726/"}'`; `curl -s 127.0.0.1:4723/json/version`; `M 4720 browser_snapshot {}`; `M 4720 browser_close {}`; after 30 s `HB/browser-reaper --json` | a `Browser` field (the lane's Chrome started on the first tool call); the snapshot shows the heading `hommy-browsers test page`; close ok; the reaper lists no Chrome of this install |
 | E6 | E3 | feed `HB/pw-identity hook pre` the PreToolUse payload of `mcp__identity__browser_navigate` for session `s-A` (README gives the payload files), then for session `s-B`; `HB/pw-identity pool`; feed `hook post` for `s-A`'s `browser_close`; `hook pre` for `s-B` again | `s-A` allowed; `s-B` denied naming the holder `s-A` and listing `identity-a` free; `pool` shows `identity` held by `s-A`; after `s-A`'s close `s-B` is allowed |
 | E7 | E3 | `SX claude plugin marketplace add /tmp/hm-s1/home/.local/share/hommy-browsers`; `SX claude plugin install hommy-browsers@hommy-browsers --config lanes_port=4720 --config identity_port=4721 --config pool=1`; `SX claude plugin list --json`; `SX claude plugin details hommy-browsers@hommy-browsers` | the plugin `enabled`; details list the `agent-browsers` skill, the lease hooks and MCP servers whose URLs use ports 4720/4721/4722 |
@@ -93,3 +93,8 @@ E1–E10 green; CI green; README; the Actions secret set.
   eye once by the implementer and listed in `implement.md`.
 - The engine's scripts kill or kickstart by label: every such call must use this install's prefix (E10 proves the live
   services survive).
+
+## Implementation notes
+- Deviation (E4, how tested): `M 4720 initialize {}` asked `mcp-call.sh` for a *tool* named `initialize`; the row runs
+  hommy-browsers' `scripts/mcp-init.sh 4720` (from its checkout, under `SX`), which sends the MCP `initialize` request
+  itself (hommy-browsers `e2e/README.md`).

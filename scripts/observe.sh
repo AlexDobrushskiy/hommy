@@ -5,13 +5,14 @@
 #   scripts/observe.sh [--slot N] jobs     created id type status target host=<host it ran on> result, oldest first
 #   scripts/observe.sh [--slot N] hosts    name online last_seen version checks (GET /api/status, the host key)
 #   scripts/observe.sh [--slot N] pings    created msg slug host session, oldest first
+#   scripts/observe.sh [--slot N] prompts  created id type msg prompt (first 120 chars, newlines as ⏎) of each run job
 # Tables print a header line, then one row per record (`none` when empty). Exit 1: no hub DB or hub not answering.
 set -euo pipefail
 HM_ME=observe
 # shellcheck source-path=SCRIPTDIR source=lib/env.sh
 source "$(dirname "$0")/lib/env.sh"
 
-usage() { sed -n '2,8s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+usage() { sed -n '2,9s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 slot=$(hm_default_slot)
 [[ ${1:-} == --slot ]] && { slot=${2:?--slot needs a number}; shift 2; }
 hm_check_slot "$slot"
@@ -42,6 +43,10 @@ case $view in
   jobs)
     q "SELECT $(ts created_at) AS created, id, type, status, target, 'host=' || host AS host,
        substr(replace(result, char(10), ' '), 1, 60) AS result FROM jobs ORDER BY created_at, seq, sub" ;;
+  prompts)
+    q "SELECT $(ts created_at) AS created, id, type, msg_id AS msg,
+       substr(replace(json_extract(payload, '$.prompt'), char(10), '⏎'), 1, 120) AS prompt
+       FROM jobs WHERE json_extract(payload, '$.prompt') IS NOT NULL ORDER BY created_at, seq, sub" ;;
   pings)
     q "SELECT $(ts created_at) AS created, msg_id AS msg, slug, host, session FROM pings ORDER BY created_at" ;;
   hosts)

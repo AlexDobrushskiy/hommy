@@ -65,8 +65,10 @@ type Probes struct {
 
 // Doctor runs the checks for one instance.
 type Doctor struct {
-	Cfg *config.Config
-	P   Probes
+	Cfg  *config.Config
+	P    Probes
+	K    KitProbes // zero value = the real ones
+	Deep bool      // --deep: live speech round trips
 }
 
 // RealProbes talk to the Mac.
@@ -137,9 +139,12 @@ func (d *Doctor) HubRole() bool {
 	return d.P.Installed("hub") || d.P.SecretHas(secret.TelegramToken)
 }
 
-// Run runs every 02 check in order.
+// Run runs every check in order (02's, then the kit's).
 func (d *Doctor) Run(ctx context.Context) []Result {
 	c := d.Cfg
+	if d.K.LookPath == nil {
+		d.K = RealKitProbes()
+	}
 	var out []Result
 	add := func(r Result) { out = append(out, r) }
 	hubRole := d.HubRole()
@@ -173,8 +178,19 @@ func (d *Doctor) Run(ctx context.Context) []Result {
 	add(d.hooks())
 	if hubRole {
 		add(d.speech(ctx))
+		if c.Get("SPEECH") == "local" {
+			add(d.speechStack())
+		}
+		if d.Deep {
+			add(d.speechDeep(ctx))
+		}
 	}
-	_ = c
+	rows, listErr := d.plugins(ctx)
+	add(d.plugin(ctx, rows, listErr))
+	add(d.browsersCheck(ctx))
+	add(d.retainer(rows, listErr))
+	add(d.optionalTool("whatsapp", "wacli", "install.sh --with-whatsapp"))
+	add(d.optionalTool("telegram-user", "telegram-agent-cli", "install.sh --with-telegram-user"))
 	return out
 }
 

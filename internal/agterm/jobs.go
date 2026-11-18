@@ -91,6 +91,12 @@ func DefaultClaudeCommand() string {
 // CLAUDE_CONFIG_DIR) go on the command line. agent is shell text (a path, maybe
 // with arguments); the login zsh stays as the session's shell once it exits.
 func AgentCommandLine(agent, home, claudeConfigDir string, skip bool) string {
+	return AgentCommandLineArgs(agent, home, claudeConfigDir, skip)
+}
+
+// AgentCommandLineArgs is AgentCommandLine with extra arguments for the agent
+// after the permission flag (each single-quoted), e.g. a first prompt.
+func AgentCommandLineArgs(agent, home, claudeConfigDir string, skip bool, extra ...string) string {
 	zsh := "/bin/zsh"
 	if runtime.GOOS != "darwin" {
 		if p, err := exec.LookPath("zsh"); err == nil {
@@ -104,6 +110,9 @@ func AgentCommandLine(agent, home, claudeConfigDir string, skip bool) string {
 	inner += " " + agent
 	if skip {
 		inner += " --dangerously-skip-permissions"
+	}
+	for _, a := range extra {
+		inner += " " + shQuote(a)
 	}
 	inner += "; exec " + zsh + " -l"
 	return zsh + " -l -c " + shQuote(inner)

@@ -4,8 +4,9 @@
 #   scripts/claude-session.sh [--slot N] -p --cwd DIR --stream FILE "<prompt>" [-- CLAUDE ARGS…]
 #       one print-mode run; the stream-json events go to FILE (e2e/README.md › Real Claude has the jq queries)
 #   scripts/claude-session.sh [--slot N] interactive [CLAUDE ARGS…]
-#       the AGENT_COMMAND of claude=real rows: interactive claude; adds --settings /tmp/hm-s<N>/claude-hooks.json when
-#       that file exists, keeps AGTERM_SESSION_ID
+#       the AGENT_COMMAND of claude=real rows: interactive claude, keeps AGTERM_SESSION_ID. One hook source: the hommy
+#       plugin when the scratch HOME has it installed (plugins-env.sh / install.sh), else --settings
+#       /tmp/hm-s<N>/claude-hooks.json (test-env.sh's file) when that exists
 #   scripts/claude-session.sh [--slot N] --audit FILE
 #       prints only `token matches: <n>` over FILE, .dev/ and the scratch root (the token is read here, never shown)
 set -euo pipefail
@@ -13,7 +14,7 @@ HM_ME='claude-session'
 # shellcheck source-path=SCRIPTDIR source=lib/env.sh
 source "$(dirname "$0")/lib/env.sh"
 
-usage() { sed -n '2,12s/^# \{0,1\}//p' "$0" >&2; exit 2; }
+usage() { sed -n '2,13s/^# \{0,1\}//p' "$0" >&2; exit 2; }
 slot=$(hm_default_slot)
 [[ ${1:-} == --slot ]] && { slot=${2:?--slot needs a number}; shift 2; }
 hm_check_slot "$slot"
@@ -53,7 +54,11 @@ case ${1:-} in
     shift
     ready
     extra=()
-    [[ -f $root/claude-hooks.json ]] && extra=(--settings "$root/claude-hooks.json")
+    # never both: with the plugin and the file, every hook event would reach the host twice
+    if ! grep -q '"hommy@hommy"' "$root/home/.claude/plugins/installed_plugins.json" 2>/dev/null &&
+      [[ -f $root/claude-hooks.json ]]; then
+      extra=(--settings "$root/claude-hooks.json")
+    fi
     [[ -n ${AGTERM_SESSION_ID:-} ]] && sx+=(--agterm-session "$AGTERM_SESSION_ID")
     exec "${sx[@]}" "$with_token" claude ${extra[@]+"${extra[@]}"} "$@" ;;
   --audit)

@@ -34,6 +34,7 @@ type Manager struct {
 	Exe       string                               // the running binary ("" = os.Executable)
 	Launchctl func(args ...string) ([]byte, error) // nil = /bin/launchctl
 	Out       io.Writer                            // progress lines (nil = discarded)
+	Changes   int                                  // what Install/Uninstall changed: a signed copy, a (re)loaded or removed service
 
 	// test seams
 	sign     func(path string) error           // nil = codesign with the instance identity
@@ -185,11 +186,13 @@ func (m *Manager) installOne(svc string, binChanged, restart, explicit bool) err
 		if err := m.bootstrap(svc); err != nil {
 			return err
 		}
+		m.Changes++
 		m.printf("installed %s (%s)", svc, inst.Label(svc))
 	case (binChanged || restart) && svc != Speech:
 		if _, err := m.launchctl("kickstart", "-k", m.target(svc)); err != nil {
 			return err
 		}
+		m.Changes++
 		why := "new settings"
 		if binChanged {
 			why = "new binary"
@@ -248,6 +251,7 @@ func (m *Manager) remove(svc string) error {
 	if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
 		return err
 	}
+	m.Changes++
 	m.printf("removed %s (%s)", svc, m.inst().Label(svc))
 	return nil
 }

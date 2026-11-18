@@ -106,6 +106,7 @@ func (m *Manager) ensureBinary() (changed bool, err error) {
 			return false, err
 		}
 	}
+	m.Changes++
 	m.printf("signed %s", dst)
 	return true, nil
 }

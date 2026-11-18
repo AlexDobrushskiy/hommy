@@ -109,9 +109,8 @@ url|set-transcript TEXT|log|stop|start|fault stt|tts|none`.
   maintainer's settings, skills, plugins or MCP servers load) with `CLAUDE_CODE_OAUTH_TOKEN` read from the scratch
   keychain into that process's environment only. Forms: `-p --cwd DIR --stream FILE "<prompt>"` (stream-json saved;
   `e2e/README.md` › "Real Claude" lists the `jq` queries: files read, tool calls by MCP server, final text);
-  `interactive` (the absolute-path `AGENT_COMMAND` of `claude=real` rows; the host appends the permission flag; until
-  05 it adds `--settings /tmp/hm-s<N>/claude-hooks.json`, from 05 the scratch HOME's installed plugins carry the
-  hooks); `--audit FILE` (reads the token itself, prints only match counts over the file, `.dev/` and the scratch
+  `interactive` (the absolute-path `AGENT_COMMAND` of `claude=real` rows; the host appends the permission flag; one hook source per session: the scratch HOME's installed `hommy@hommy`
+  plugin when it is there (05 on, `plugins-env.sh` or `install.sh`), else `--settings /tmp/hm-s<N>/claude-hooks.json`); `--audit FILE` (reads the token itself, prints only match counts over the file, `.dev/` and the scratch
   root). The token never appears in argv, a file outside the keychains, a log, a report or a transcript. Token sessions
   cannot start Remote Control, so `claude.ai` links are absent in tests (expected).
 - **The token:** the long-lived token the build plan names (private companion), imported once by the workspace op
