@@ -58,7 +58,7 @@ func (d *Doctor) speechStack() Result {
 	c := d.Cfg
 	var missing, fixes []string
 	for _, t := range stack.Tools {
-		if _, ok := stack.Find(d.ServicePath(), t.Name); !ok {
+		if !d.executable(d.ServicePath(), t.Name) {
 			missing = append(missing, t.Name)
 			fixes = append(fixes, t.Fix)
 		}
@@ -76,6 +76,16 @@ func (d *Doctor) speechStack() Result {
 		return fail("speech-stack", p+" missing or not the pinned SHA-256", "hommy setup (downloads it again)")
 	}
 	return ok("speech-stack", "llama-swap, whisper-server, ffmpeg, mlx_audio.server; "+m.File()+" verified")
+}
+
+// executable: an executable file name is in one of dirs (stack.Find, through the Stat probe).
+func (d *Doctor) executable(dirs []string, name string) bool {
+	for _, dir := range dirs {
+		if fi, err := d.P.Stat(filepath.Join(dir, name)); err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // speechDeep: the embedded "hello" through STT, "ok" through TTS as Ogg Opus.
@@ -229,6 +239,16 @@ func (d *Doctor) optionalTool(id, tool, fix string) Result {
 		return ok(id, p)
 	}
 	return Result{ID: id, Mark: Optional, Detail: tool + " not installed (optional: " + fix + ")"}
+}
+
+// whatsapp: wacli is optional; without shfmt the WhatsApp guard can't parse commands, so it asks before every wacli one.
+func (d *Doctor) whatsapp() Result {
+	r := d.optionalTool("whatsapp", "wacli", "install.sh --with-whatsapp")
+	if _, err := d.K.LookPath("shfmt"); r.Mark == OK && err != nil {
+		r.Mark = Optional
+		r.Detail += "; shfmt not installed, so the WhatsApp guard asks before every wacli command (optional: brew install shfmt)"
+	}
+	return r
 }
 
 func parseWhisper(raw string) []string {

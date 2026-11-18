@@ -135,6 +135,9 @@ url|set-transcript TEXT|log|stop|start|fault stt|tts|none`.
 - Tests never run `brew install`/`upgrade` on the build Mac (05 uses `--brew-check-only`; tools come from
   `scripts/tools.sh`), never pull Ollama models (browsers without `--with-captcha`), never write the real Claude config
   or login keychain.
+- Tests never read what the machine has installed: every lookup a test asserts on (agtermctl, a tool on PATH or in a
+  service dir, an app bundle) goes through a probe the test fakes, and a tool a test really runs (shfmt for the
+  WhatsApp guard) comes from `scripts/tools.sh`. CI runs on GitHub-hosted runners, which have no agterm or shfmt.
 
 ## 8. Tart VM (05, 06, 07)
 

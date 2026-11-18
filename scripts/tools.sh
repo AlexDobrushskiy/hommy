@@ -3,13 +3,13 @@
 #   scripts/tools.sh ensure <tool>...   download, verify and unpack into .dev/tools/ (idempotent); links .dev/tools/<tool>
 #   scripts/tools.sh path <tool>        print the tool's path (after ensure)
 #   scripts/tools.sh list               the pinned tools and versions
-# Tools: gitleaks, shellcheck, tart, goreleaser. HOMMY_TOOLS_DIR overrides .dev/tools.
+# Tools: gitleaks, shellcheck, tart, goreleaser, shfmt. HOMMY_TOOLS_DIR overrides .dev/tools.
 set -euo pipefail
 ROOT=$(cd "$(dirname "$0")/.." && pwd -P)
 # shellcheck source=scripts/tools.env
 . "$ROOT/scripts/tools.env"
 DIR=${HOMMY_TOOLS_DIR:-$ROOT/.dev/tools}
-TOOLS="gitleaks shellcheck tart goreleaser"
+TOOLS="gitleaks shellcheck tart goreleaser shfmt"
 
 die() { echo "tools.sh: $*" >&2; exit 1; }
 var() { local u; u=$(echo "$1" | tr '[:lower:]' '[:upper:]'); eval "printf '%s' \"\${${u}_$2:-}\""; }
@@ -32,6 +32,7 @@ ensure() {
     case $arc in
       *.tar.gz | *.tgz) tar -xzf "$arc" -C "$tmp/x" ;;
       *.tar.xz) tar -xJf "$arc" -C "$tmp/x" ;;
+      */"$bin") mv "$arc" "$tmp/x/$bin" && chmod 755 "$tmp/x/$bin" ;; # a bare binary: BIN is the asset's name
       *) rm -rf "$tmp"; die "$t: unknown archive type" ;;
     esac
     [ -x "$tmp/x/$bin" ] || { rm -rf "$tmp"; die "$t: $bin not in the archive"; }

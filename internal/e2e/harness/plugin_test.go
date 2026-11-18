@@ -141,7 +141,8 @@ func TestOptionalToolShimsAreNoOpsWithoutTheirTool(t *testing.T) {
 	}
 }
 
-func guard(t *testing.T, path, command string) string {
+// guardReason runs wacli-guard on a Bash command; returns its decision (pass = no output) and reason.
+func guardReason(t *testing.T, path, command string) (string, string) {
 	t.Helper()
 	in, _ := json.Marshal(map[string]any{"tool_name": "Bash", "tool_input": map[string]string{"command": command}})
 	out, code := runShim(t, "wacli-guard", string(in), []string{"HOME=" + t.TempDir(), "PATH=" + path})
@@ -149,25 +150,50 @@ func guard(t *testing.T, path, command string) string {
 		t.Fatalf("%q: exit %d: %s", command, code, out)
 	}
 	if out == "" {
-		return "pass"
+		return "pass", ""
 	}
 	var d struct {
-		HookSpecificOutput struct{ PermissionDecision string } `json:"hookSpecificOutput"`
+		HookSpecificOutput struct{ PermissionDecision, PermissionDecisionReason string } `json:"hookSpecificOutput"`
 	}
 	if err := json.Unmarshal([]byte(out), &d); err != nil {
 		t.Fatalf("%q: %q", command, out)
 	}
-	return d.HookSpecificOutput.PermissionDecision
+	return d.HookSpecificOutput.PermissionDecision, d.HookSpecificOutput.PermissionDecisionReason
 }
 
-func TestWacliGuard(t *testing.T) {
-	send := "wacli send text --to +10000000000 --message hi"
-	// no wacli on PATH: everything passes
-	if got := guard(t, "/usr/bin:/bin", send); got != "pass" {
-		t.Fatalf("without wacli: %s", got)
+func guard(t *testing.T, path, command string) string {
+	t.Helper()
+	d, _ := guardReason(t, path, command)
+	return d
+}
+
+// pinnedShfmt returns a dir holding only `shfmt`: the pinned release from scripts/tools.sh, never the machine's own.
+func pinnedShfmt(t *testing.T) string {
+	t.Helper()
+	tools := "../../../scripts/tools.sh"
+	if out, err := exec.Command(tools, "ensure", "shfmt").CombinedOutput(); err != nil {
+		t.Fatalf("tools.sh ensure shfmt: %v\n%s", err, out)
 	}
-	path := fakeBin(t, "wacli", "exit 0") + ":/opt/homebrew/bin:/usr/bin:/bin"
-	cases := map[string]string{
+	out, err := exec.Command(tools, "path", "shfmt").Output()
+	if err != nil {
+		t.Fatalf("tools.sh path shfmt: %v", err)
+	}
+	dir := t.TempDir()
+	if err := os.Symlink(strings.TrimSpace(string(out)), filepath.Join(dir, "shfmt")); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
+// wacliCases: guard decisions with wacli and shfmt installed.
+func wacliCases(t *testing.T) map[string]string {
+	t.Helper()
+	broken := filepath.Join(t.TempDir(), "broken.sh") // line 1 runs before bash meets the syntax error
+	if err := os.WriteFile(broken, []byte("wacli send text --to x --message y\nfi\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	send := "wacli send text --to +10000000000 --message hi"
+	return map[string]string{
 		"wacli --json chats list --limit 30":                          "pass",
 		"wacli --json messages search invoice | head":                 "pass",
 		"wacli send text --help":                                      "pass",
@@ -189,11 +215,53 @@ func TestWacliGuard(t *testing.T) {
 		`"$(command -v wacli)" --json chats list`:            "pass",
 		"w=$(command -v wacli); $w --json messages search x": "pass",
 		"n=$(wacli --json chats list | wc -l); echo $n":      "pass",
+		// fail closed: shfmt can't parse it (or a script it runs), so it is not checked
+		"\"$(command -v wacli)\" send text --to x --message y\nfi": "ask",
+		"wacli --json chats list\nfi":                              "ask",
+		"bash " + broken:                                           "ask",
 	}
-	for cmd, want := range cases {
+}
+
+func TestWacliGuard(t *testing.T) {
+	// no wacli on PATH: everything passes
+	if got := guard(t, "/usr/bin:/bin", "wacli send text --to +10000000000 --message hi"); got != "pass" {
+		t.Fatalf("without wacli: %s", got)
+	}
+	path := fakeBin(t, "wacli", "exit 0") + ":" + pinnedShfmt(t) + ":/usr/bin:/bin"
+	for cmd, want := range wacliCases(t) {
 		if got := guard(t, path, cmd); got != want {
 			t.Errorf("%q: %s, want %s", cmd, got, want)
 		}
+	}
+}
+
+// Without shfmt the guard can't parse anything, so every command naming wacli asks (fail closed).
+func TestWacliGuardFailsClosedWithoutShfmt(t *testing.T) {
+	path := fakeBin(t, "wacli", "exit 0") + ":/usr/bin:/bin"
+	for _, d := range filepath.SplitList(path) {
+		if _, err := os.Stat(filepath.Join(d, "shfmt")); err == nil {
+			t.Fatalf("shfmt in %s: this test needs a PATH without it", d)
+		}
+	}
+	for cmd := range wacliCases(t) {
+		got, why := guardReason(t, path, cmd)
+		if got != "ask" || !strings.Contains(why, "brew install shfmt") {
+			t.Errorf("%q: %s (%s), want ask naming shfmt", cmd, got, why)
+		}
+	}
+	if got := guard(t, path, "ls -la"); got != "pass" {
+		t.Errorf("a command without wacli: %s", got)
+	}
+}
+
+// A command the guard itself can't handle (a lone surrogate can't be encoded for shfmt) asks instead of crashing:
+// a crashed PreToolUse hook is a non-blocking error, so the command would run unchecked.
+func TestWacliGuardAsksWhenItCannotCheck(t *testing.T) {
+	path := fakeBin(t, "wacli", "exit 0") + ":" + pinnedShfmt(t) + ":/usr/bin:/bin"
+	in := `{"tool_name":"Bash","tool_input":{"command":"wacli send text --to x --message \"\ud800\""}}`
+	out, code := runShim(t, "wacli-guard", in, []string{"HOME=" + t.TempDir(), "PATH=" + path})
+	if code != 0 || !strings.Contains(out, `"permissionDecision": "ask"`) {
+		t.Fatalf("exit %d: %s", code, out)
 	}
 }
 

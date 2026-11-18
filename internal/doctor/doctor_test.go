@@ -31,6 +31,7 @@ type fakeWorld struct {
 	stt, tts  error
 	text      string
 	tools     map[string]bool
+	agtermctl string // its path; "" = not found
 	deep      bool
 }
 
@@ -109,6 +110,12 @@ func (w *fakeWorld) probes() Probes {
 		},
 		Service:   func(n string) (bool, bool) { s := w.svc[n]; return s[0], s[1] },
 		Installed: func(n string) bool { return w.installed[n] },
+		Agtermctl: func() (string, error) {
+			if w.agtermctl == "" {
+				return "", errors.New("agtermctl not found")
+			}
+			return w.agtermctl, nil
+		},
 		Pairing: func(context.Context) (pairing.State, error) {
 			var st pairing.State
 			if w.http["/api/pairing"] != 200 {
@@ -138,7 +145,8 @@ func healthy(t *testing.T) (*config.Config, *fakeWorld) {
 	c.WithEnv(func(k string) (string, bool) { v, ok := env[k]; return v, ok })
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	w := &fakeWorld{
-		cmds: map[string]string{"sw_vers -productVersion": "15.1", "version": "hommy v1", "/x/claude --version": "2.1.0 (Claude Code)",
+		cmds: map[string]string{"sw_vers -productVersion": "15.1", inst.BinPath() + " version": "hommy v1",
+			"/fake/agterm/agtermctl version": "agterm 0.40.0", "/x/claude --version": "2.1.0 (Claude Code)",
 			"/x/claude auth status": "{}", "-r- " + inst.BinPath(): `designated => identifier "dev.hommy" and certificate leaf = H"ab"`,
 			"/x/claude plugin list --json":                  `[{"id":"hommy@hommy","version":"0.1.0","enabled":true},{"id":"retainer@retainer","version":"1.0.0","enabled":true}]`,
 			"/x/claude plugin configure hommy@hommy --json": `{"inputs":{"instance":"unit"}}`},
@@ -149,6 +157,7 @@ func healthy(t *testing.T) (*config.Config, *fakeWorld) {
 		secrets: map[string]string{"host-key": strings.Repeat("k", 48), "telegram-bot-token": "1:x", "hub-host-keys": "mac1 k"},
 		files: map[string]os.FileMode{c.Path: 0o600, inst.BinPath(): 0o755, "/Applications/Google Chrome.app": 0o755,
 			inst.Home + "/.local/share/hommy-unit-browsers/install.sh": 0o755},
+		agtermctl: "/fake/agterm/agtermctl",
 		mcp:       map[int]bool{4716: true},
 		modelOK:   true,
 		text:      "Hello.",
@@ -179,7 +188,7 @@ func TestDoctorAllGreen(t *testing.T) {
 	if red {
 		t.Fatalf("red:\n%s", out)
 	}
-	for _, id := range []string{"platform", "claude", "claude-auth", "config", "secrets", "telegram", "binary", "services",
+	for _, id := range []string{"platform", "agterm", "claude", "claude-auth", "config", "secrets", "telegram", "binary", "services",
 		"hub", "paired", "host", "vault", "hooks", "speech", "plugin", "browsers", "retainer"} {
 		if m[id].Mark != OK {
 			t.Errorf("%s: %+v", id, m[id])
@@ -196,6 +205,8 @@ func TestDoctorTable(t *testing.T) {
 		break_ func(c *config.Config, w *fakeWorld)
 		fix    string
 	}{
+		{"agterm", func(_ *config.Config, w *fakeWorld) { w.agtermctl = "" }, "brew install --cask umputun/apps/agterm"},
+		{"agterm", func(_ *config.Config, w *fakeWorld) { delete(w.cmds, "/fake/agterm/agtermctl version") }, "open -a agterm"},
 		{"speech", func(_ *config.Config, w *fakeWorld) { delete(w.http, "4712/health") }, "check WHISPER_ENDPOINTS / TTS_URL"},
 		{"telegram", func(_ *config.Config, w *fakeWorld) { w.http["/getMe"] = 401 }, "@BotFather"},
 		{"config", func(c *config.Config, w *fakeWorld) { w.files[c.Path] = 0o644 }, "chmod 600"},
@@ -258,13 +269,18 @@ func TestDoctorSpeechStack(t *testing.T) {
 	w.http["4714/health"] = 200
 	w.svc["speech"] = [2]bool{true, true}
 	bin := c.Inst.Home + "/.local/bin"
-	os.MkdirAll(bin, 0o755)
 	m, _, _ := run(c, w)
 	if m["speech-stack"].Mark != Fail || !strings.Contains(m["speech-stack"].Fix, "install.sh (re-run)") {
 		t.Fatalf("tools missing: %+v", m["speech-stack"])
 	}
 	for _, tool := range []string{"llama-swap", "whisper-server", "ffmpeg", "mlx_audio.server"} {
-		os.WriteFile(bin+"/"+tool, []byte("#!/bin/sh\n"), 0o755)
+		w.files[bin+"/"+tool] = 0o644 // not executable: still missing
+	}
+	if m, _, _ := run(c, w); m["speech-stack"].Mark != Fail {
+		t.Fatalf("tools not executable: %+v", m["speech-stack"])
+	}
+	for _, tool := range []string{"llama-swap", "whisper-server", "ffmpeg", "mlx_audio.server"} {
+		w.files[bin+"/"+tool] = 0o755
 	}
 	m, out, _ := run(c, w)
 	if m["speech-stack"].Mark != OK || !strings.Contains(out, "ggml-small.bin verified") {
@@ -283,8 +299,13 @@ func TestDoctorOptionalTools(t *testing.T) {
 	if red || m["whatsapp"].Mark != Optional || !strings.Contains(out, "! telegram-user telegram-agent-cli not installed") {
 		t.Fatalf("red=%v\n%s", red, out)
 	}
-	w.tools = map[string]bool{"wacli": true}
+	w.tools = map[string]bool{"wacli": true, "shfmt": true}
 	if m, _, _ := run(c, w); m["whatsapp"].Mark != OK {
 		t.Fatalf("%+v", m["whatsapp"])
+	}
+	// wacli without shfmt: the guard asks before every wacli command; doctor says why, still not red
+	w.tools = map[string]bool{"wacli": true}
+	if m, out, red := run(c, w); red || m["whatsapp"].Mark != Optional || !strings.Contains(m["whatsapp"].Detail, "brew install shfmt") {
+		t.Fatalf("red=%v %+v\n%s", red, m["whatsapp"], out)
 	}
 }

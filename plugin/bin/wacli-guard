@@ -11,9 +11,11 @@ session's Bash environment (CLAUDE_ENV_FILE) when wacli is installed and the
 user has not set WACLI_READONLY themselves, so a write the parser misses still
 fails with "read-only mode".
 
-Commands are parsed with shfmt (a real bash/zsh parser), so wacli named inside
-data — a message, a heredoc, a commit message, a $'…' string — is not an
-invocation. Only programs the shell would actually run are checked.
+Commands are parsed with shfmt (a real bash/zsh parser) found on PATH, so wacli
+named inside data — a message, a heredoc, a commit message, a $'…' string — is
+not an invocation. Only programs the shell would actually run are checked.
+Fail closed: a command naming wacli that can't be fully parsed (no shfmt, or
+shfmt rejects it or a script it runs) or that the guard fails on gets "ask".
 """
 import codecs
 import json
@@ -72,24 +74,15 @@ WRITE_WORD_RE = re.compile(r"\bwacli\b[^\n]{0,80}?\b(?!(?:" + "|".join(
     re.escape(g) for g in READ_ALLOW) + r")\b)(send|react|edit|revoke|delete|mark-read|sync|auth|pair|logout|"
     r"create|leave|join|add|remove|promote|demote|set-\w+|block|unblock|archive|pin|mute)\b")
 
-# fallback when shfmt can't parse: crude text checks
-FB_OVERRIDE_RE = re.compile(RO + r"=(?:0|false|no|off|\"\"|''|\s|$)|--read-only[= ](?:false|0)|unset\s+" + RO, re.I)
-FB_CALL_RE = re.compile(r"(?:^|[;&|(`]|\n)\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:\S*/)?wacli((?:\s+[^\s;&|)]+)*)")
-
 
 class ParseError(Exception):
     pass
 
 
-def shfmt_bin():
-    return shutil.which("shfmt") or next(
-        (p for p in ("/opt/homebrew/bin/shfmt", "/usr/local/bin/shfmt") if os.path.exists(p)), None)
-
-
 def parse(cmd):
-    exe = shfmt_bin()
+    exe = shutil.which("shfmt")
     if not exe:
-        raise ParseError("shfmt not installed")
+        raise ParseError("shfmt is not installed (brew install shfmt), so the command can't be parsed")
     for lang in ("bash", "zsh"):
         try:
             r = subprocess.run([exe, "-ln", lang, "--to-json"], input=cmd, capture_output=True,
@@ -98,7 +91,7 @@ def parse(cmd):
             raise ParseError(str(e))
         if r.returncode == 0:
             return json.loads(r.stdout)
-    raise ParseError("shfmt could not parse")
+    raise ParseError("the command could not be parsed")
 
 
 def unescape(s):
@@ -382,32 +375,18 @@ class Scan:
                     text = f.read()
                 if re.search(r"wacli|" + RO, text, re.I):
                     self.shell(text, depth + 1)
-        except (OSError, ParseError):
+        except OSError:
             pass
-
-
-def fallback(cmd):
-    """Text-only checks for a command shfmt can't parse (bash can't run it either)."""
-    reasons = []
-    calls = []
-    for m in FB_CALL_RE.finditer(cmd):
-        toks = [(t.strip("'\""), False) for t in m.group(1).split()]
-        calls.append(toks)
-        r = check_invocation(toks)
-        if r:
-            reasons.append(r)
-    if FB_OVERRIDE_RE.search(cmd) and not (calls and all(
-            tuple(t for t, _ in c if not t.startswith("-"))[:2] in OVERRIDE_OK for c in calls)):
-        reasons.append("overrides WACLI_READONLY / --read-only")
-    return reasons
+        except ParseError as e:
+            self.reasons.append(f"{path}: {e}")
 
 
 def scan(cmd):
     s = Scan()
     try:
         s.shell(cmd)
-    except ParseError:
-        return fallback(cmd)
+    except ParseError as e:
+        return [str(e)]
     reasons = list(s.reasons)
     only_check = bool(s.calls)
     for args in s.calls:
@@ -450,7 +429,10 @@ def main():
     cmd = (data.get("tool_input") or {}).get("command") or ""
     if not re.search(r"wacli", cmd, re.I):
         return 0
-    reasons = scan(cmd)
+    try:
+        reasons = scan(cmd)
+    except Exception as e:  # fail closed: a crash would let the command run unchecked
+        reasons = [f"the guard could not check the command ({type(e).__name__})"]
     if not reasons:
         return 0
     out = {

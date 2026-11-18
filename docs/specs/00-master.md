@@ -345,7 +345,8 @@ source's session commands (`/spawn`, `/peek`, `/files`, `/pause`, `/done`).
   status (UserPromptSubmit/PostToolUse `active`, Notification `permission_prompt` and PermissionRequest `blocked`,
   SessionEnd `idle`) → `bin/agterm-status` (agterm's bundled status script when present, else nothing); PreToolUse
   guards: `bin/wacli-guard` and `telegram-agent-cli hook claude-pretooluse` (each a no-op when its tool is not on
-  PATH). Skills: `notify` (`hommy send`), `whatsapp`, `telegram`, `shopping-research`, de-personalised from the source
+  PATH; `wacli-guard` parses with `shfmt` and asks for any `wacli` command it can't parse, `shfmt` missing included).
+  Skills: `notify` (`hommy send`), `whatsapp`, `telegram`, `shopping-research`, de-personalised from the source
   (`docs/spec-private.md` › `SRC_SKILLS`). No plugin secret exists: the only `userConfig` value is the instance (§14 D-5).
 - **`hommy-browsers`** (its own repo, its own marketplace at the repo root, design D8): the `agent-browsers` skill,
   the identity-lease hooks, and `.mcp.json` registering `pw-lane`, `pw-lane-a…d`, `identity`, `identity-a…d` over HTTP
@@ -588,7 +589,7 @@ runs as an overseer side task during 01, so 05 never waits on it.
 | D-16 | 02's "doctor red when llama-swap is stopped" is proven with the fake speech server in 02 (E8) and with the real llama-swap in 05 (E4). | The instance has no llama-swap until 05; tests never touch the maintainer's. |
 | D-17 | Multi-host: `setup --join` and `hub host-key add` are built and proven over loopback (02-E15); the LAN listen, the macOS firewall prompt and the Local Network grant are documented in the README, not tested. | A LAN row would need a second machine or a VM↔build-Mac network path; the protocol is the source's, unchanged. |
 | D-18 | Scratch roots live in `/tmp/hm-s<N>/` and every test command runs through `scripts/sx.sh`. | Workers inherit the maintainer's `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_*`; a scratch root inside the workspace loads its private `CLAUDE.md` and overflows macOS's 104-byte socket paths in workslots. |
-| D-19 | Build tools for tests (gitleaks, shellcheck, Tart, GoReleaser) come from pinned release archives with SHA-256 via `scripts/tools.sh` into `.dev/tools/`. | Never modify the build Mac's Homebrew; CI and local use the same versions. |
+| D-19 | Build tools for tests (gitleaks, shellcheck, Tart, GoReleaser, shfmt) come from pinned release assets with SHA-256 via `scripts/tools.sh` into `.dev/tools/`. | Never modify the build Mac's Homebrew; CI and local use the same versions. |
 | D-20 | Sessions the host or setup opens in agterm get the host's `HOME` (and `CLAUDE_CONFIG_DIR` when set) on their command line. | agterm starts sessions with its own environment; without this a test instance's session would run Claude on the maintainer's config, and a user with a custom `CLAUDE_CONFIG_DIR` would get a different Claude than `hommy` checked. |
 | D-21 | 05 proves one fresh VM install; the VM re-run, the optional extras and the upgrade run in 06's VM after the errand. | One VM bring-up fewer (≈ 45 min) with the same proof; 05's idempotency and upgrade are also proven on the build Mac (E2, E5). |
 | D-22 | 01 ports the kit's workslots (`scripts/slot.sh`, `docs/workslots.md`, `scripts/dev-up.sh`/`dev-down.sh` as wrappers of `test-env.sh`); 04 runs in slot 2, 07's prep in slot 3; 04's plugin setup is its own script (`scripts/plugins-env.sh`) so 02 and 04 do not edit the same harness file. | D-15's parallel lanes need checkouts of their own; the kit expects these from phase 01. |

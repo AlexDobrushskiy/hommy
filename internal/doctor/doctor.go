@@ -55,6 +55,7 @@ type Probes struct {
 	ReadFile  func(path string) ([]byte, error)
 	Service   func(name string) (loaded, running bool) // launchd state of hub|host|speech
 	Installed func(name string) bool                   // the plist exists
+	Agtermctl func() (string, error)                   // where agtermctl is (agterm.FindAgtermctl)
 	// Pairing and APIStatus ask the hub (GET /api/pairing, /api/status) with this Mac's host key.
 	Pairing   func(ctx context.Context) (pairing.State, error)
 	APIStatus func(ctx context.Context) (pairing.Status, error)
@@ -128,6 +129,7 @@ func RealProbes(c *config.Config, service func(string) (bool, bool), installed f
 		ReadFile:  os.ReadFile,
 		Service:   service,
 		Installed: installed,
+		Agtermctl: agterm.FindAgtermctl,
 		GOOS:      runtime.GOOS,
 		GOARCH:    runtime.GOARCH,
 		Version:   version.String(),
@@ -189,7 +191,7 @@ func (d *Doctor) Run(ctx context.Context) []Result {
 	add(d.plugin(ctx, rows, listErr))
 	add(d.browsersCheck(ctx))
 	add(d.retainer(rows, listErr))
-	add(d.optionalTool("whatsapp", "wacli", "install.sh --with-whatsapp"))
+	add(d.whatsapp())
 	add(d.optionalTool("telegram-user", "telegram-agent-cli", "install.sh --with-telegram-user"))
 	return out
 }
@@ -227,7 +229,7 @@ func (d *Doctor) platform(ctx context.Context) Result {
 
 func (d *Doctor) agtermCheck(ctx context.Context) Result {
 	const fix = "brew install --cask umputun/apps/agterm, then open -a agterm"
-	p, err := agterm.FindAgtermctl()
+	p, err := d.P.Agtermctl()
 	if err != nil {
 		return fail("agterm", "agtermctl not found", fix)
 	}
