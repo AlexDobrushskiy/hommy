@@ -1,5 +1,7 @@
-# GoReleaser v2 (master spec §8.3). Local snapshots only until the public go: scripts/release-snapshot.sh.
-# Never needs GITHUB_TOKEN and never touches the tap: release disabled, the cask is written to dist/ only.
+# GoReleaser v2 (master spec §8.3). Snapshots (scripts/release-snapshot.sh) publish nothing and need no token: the
+# cask is written to dist/ only. A tag release (the workspace's go step, on the build Mac with GITHUB_TOKEN from
+# `gh auth token`) creates the GitHub release with the archive and commits Casks/hommy.rb to the tap as the noreply
+# identity. No tap-write secret lives in Actions.
 version: 2
 project_name: hommy
 
@@ -31,10 +33,18 @@ snapshot:
   version_template: '{{ if index .Env "HOMMY_VERSION" }}{{ index .Env "HOMMY_VERSION" }}{{ else }}{{ incpatch .Version }}-dev{{ end }}'
 
 changelog:
-  disable: true
+  # snapshots: none; a tag release takes its notes from CHANGELOG.md (--release-notes; a disabled changelog drops them)
+  disable: "{{ .IsSnapshot }}"
 
 release:
-  disable: true
+  github:
+    owner: AlexDobrushskiy
+    name: hommy
+  name_template: "hommy {{ .Tag }}"
+  prerelease: auto
+  mode: keep-existing
+  # a resumed go (`--go --from release`) re-uploads over the assets of its earlier attempt instead of failing on a 422
+  replace_existing_artifacts: true
 
 homebrew_casks:
   - name: hommy
@@ -43,7 +53,7 @@ homebrew_casks:
     homepage: https://github.com/AlexDobrushskiy/hommy
     description: Voice-note errands from Telegram, run by Claude Code on your Mac
     license: MIT
-    skip_upload: true
+    skip_upload: false # tags only: a snapshot never publishes
     # The release asset of the public go. A snapshot install (install.sh --source) points its local tap's copy at
     # the archive in DIR/dist/ instead.
     url:

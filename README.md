@@ -9,9 +9,81 @@ comes back to the same chat as text and, for longer replies, a voice note.
 - **Your subscription, your Claude:** hommy starts the unmodified `claude` you signed in to. It is never bundled.
 - **macOS 14+ on Apple Silicon only.**
 
-> Not released yet: nothing here is ready to install from a public source. Development notes are at the end.
+A typical errand: you are walking and say "book me a haircut at Barbearia Exemplo tomorrow at half ten". The hub on
+your Mac transcribes the voice note locally, the host opens a new agterm session running `claude` in your vault, the
+vault's routing table sends it to the `book-local-service` recipe, which opens the barber's booking page in a browser
+of [hommy-browsers](https://github.com/AlexDobrushskiy/hommy-browsers), picks the slot and asks you on Telegram
+("Book haircut, tomorrow 10:30? Yes / No") before the final click. You tap Yes; it books, writes the reference to the
+vault's `log.md` and answers with a short text and a voice note. (Barbearia Exemplo is invented; see The barber demo.)
 
-## Setup
+## Install: one command
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/AlexDobrushskiy/hommy/main/install.sh | bash
+```
+
+Run it in Terminal as an admin user. It installs what is missing (below), then runs `hommy setup`, which asks for your
+bot token and walks you through pairing. Re-running it is safe: nothing changes when nothing is new, and a newer hommy
+is upgraded with every setting kept. Each step prints `[n/9] <stage>: present|installed|upgraded|skipped`, and
+`~/.local/state/hommy/install.log` records every command with its source.
+
+Flags go after `bash -s --`, e.g. `curl -fsSL …/install.sh | bash -s -- --with-whatsapp`:
+
+| Flag | Meaning |
+|---|---|
+| `--with-whatsapp` | also install `wacli` (WhatsApp; read the Risks first) |
+| `--with-telegram-user` | also install `telegram-agent-cli` (your own Telegram account; opt-in) |
+| `--with-captcha` | the local captcha solver's models (several GB) |
+| `--whisper-model large-v3-turbo\|medium\|small` | the local speech-to-text model (default `large-v3-turbo`) |
+| `--instance NAME`, `--port-base N` | a second, separate install beside the default one |
+| `--non-interactive` | never prompt; the bot token must already be in the Keychain (Setup in detail, Unattended) |
+| any `hommy setup` flag | passed through (Setup in detail) |
+
+Homebrew's own installer asks for your password once when Homebrew is missing.
+
+## What gets installed
+
+Every tool comes from its own source; nothing is vendored, and Claude Code is never bundled.
+
+| # | What | From |
+|---|---|---|
+| 1 | checks: macOS 14+, Apple Silicon, an admin user, 10 GB free | — |
+| 2 | Homebrew, if missing | the official installer from [Homebrew/install](https://github.com/Homebrew/install) |
+| 3 | `ffmpeg`, `whisper-cpp`, `llama-swap`, `uv`, `node`, `git`, [agterm](https://github.com/umputun/agterm), Google Chrome ([Brewfile](Brewfile); tools you already have are not upgraded) | Homebrew (core, the `mostlygeek/llama-swap` tap, the `umputun/apps` tap, casks) |
+| 4 | mlx-audio (Kokoro text to speech) with the English G2P model | PyPI via `uv tool install`, the spaCy model release |
+| 5 | Claude Code, only when `claude` is missing; you sign in with your own subscription | Anthropic's installer, `https://claude.ai/install.sh` |
+| 6 | hommy | the `hommy` cask of [AlexDobrushskiy/homebrew-tap](https://github.com/AlexDobrushskiy/homebrew-tap) (this repo's releases) |
+| 7 | hommy-browsers into `~/.local/share/hommy-browsers` | a clone of [AlexDobrushskiy/hommy-browsers](https://github.com/AlexDobrushskiy/hommy-browsers) |
+| 8 | optional extras (the `--with-*` flags) | their own taps |
+| 9 | `hommy setup`: vault, speech (the whisper model from Hugging Face, checksum-pinned), launchd services, Claude Code plugins (hommy, hommy-browsers, [retainer](https://github.com/AlexDobrushskiy/retainer)), pairing, doctor | — |
+
+## First steps
+
+1. **Pair.** Setup prints a code `XXXX-XXXX` and a `t.me` link. Open the link on your phone (or send your bot
+   `/start XXXX-XXXX` in a private chat). The bot answers that it is paired; from now on it listens to you only.
+2. **First voice note.** Send the bot a voice note: "What's in my vault?". A session opens in agterm on the Mac, the
+   bot answers `started <name> on <mac>` and then the reply. Watch the session in agterm if you like; type into it at
+   the Mac and those turns stay local.
+3. **Check it.** `hommy doctor` prints one line per check, `✓` or `✗` with the command that fixes it.
+4. **Teach it about you.** Setup offers to open a session that runs the retainer interview (`--seed-context` says yes
+   up front); it fills `context/` (home address, usual places, preferences), which the recipes read. Later, ask any
+   session in the vault: "Run the retainer interview".
+
+## The barber demo
+
+Barbearia Exemplo is an invented barber served locally by this repo's test fixture, so you can watch the reference
+flow end to end without booking anything real. From a clone of this repo (needs Go: `brew install go`):
+
+```sh
+go run ./cmd/hommy-e2e booking-site --port 8480 --log /tmp/barber.log &      # http://127.0.0.1:8480/
+scripts/vault.sh add-place ~/hommy-vault "Barbearia Exemplo" http://127.0.0.1:8480/
+```
+
+Then send the bot "Book a haircut at Barbearia Exemplo tomorrow at 10:30." The agent opens the site in a lane browser,
+reaches the confirmation page and asks you before the final click; `/tmp/barber.log` shows each page it requested.
+Answer Yes and the site shows `Booked ✓ ref BX-1`; the vault's `log.md` gets the line. Stop the site with `kill %1`.
+
+## Setup in detail
 
 ```sh
 hommy setup
@@ -49,7 +121,11 @@ hommy setup
 | `--port-base N`, `--host-name NAME` | first port (default 8470), this Mac's host name (default its `LocalHostName`) |
 | `--telegram-api URL` | Bot API base URL (default `https://api.telegram.org`) |
 | `--no-pair-wait` | do not wait for pairing (run `hommy pair` later) |
-| `--join WS_URL --name NAME --key-stdin` | host-only install on another Mac (More Macs) |
+| `--join WS_URL --name NAME --key-stdin` | host-only install on another Mac (More hosts) |
+
+**Unattended** (`--non-interactive`, e.g. through the installer's `bash -s -- --non-interactive --no-pair-wait`): put the
+bot token into the Keychain first with `security add-generic-password -s hommy -a telegram-bot-token -w` (it asks for
+the token), then pair later with `hommy pair`.
 
 ### Pairing
 
@@ -136,11 +212,14 @@ Logs are in `~/.local/state/hommy/<hub|host|speech>/{out,err}.log`. `uninstall` 
 `--purge` also removes exactly the files, folders and Keychain items hommy created, and never anything else in those
 folders (your vault is never touched).
 
-**Signed stable copy.** Services run a copy of the binary at `~/.local/share/hommy/bin/hommy`, signed with a
-self-signed certificate created at install in its own keychain (no Apple Developer ID, no dialog). macOS ties privacy
-grants (Full Disk Access, Local Network) to a binary's code requirement. An unsigned build is identified by its hash,
-which changes with every build and silently drops the grant, so an unattended run would hang on a prompt nobody sees.
-The stable path and certificate keep the grant across upgrades.
+## Signing
+
+hommy has no Apple Developer ID. The release binary is not notarized (the cask clears the download quarantine flag),
+and services run a copy of it at `~/.local/share/hommy/bin/hommy`, signed with a self-signed certificate created at
+install in its own keychain (no dialog). macOS ties privacy grants (Full Disk Access, Local Network) to a binary's code
+requirement. An unsigned build is identified by its hash, which changes with every build and silently drops the grant,
+so an unattended run would hang on a prompt nobody sees. The stable path and certificate keep the grant across
+upgrades. The certificate only does that: it proves nothing about who built the binary.
 
 ## Doctor
 
@@ -163,7 +242,7 @@ exit 0 when nothing is red. `hommy doctor --deep` adds live speech round trips.
 
 The installer adds checks for the speech stack, the Claude plugins, the browsers and optional tools.
 
-## More Macs
+## More hosts (more Macs)
 
 Run extra hosts on other Macs against the same hub. On the hub Mac:
 
@@ -221,15 +300,39 @@ with your context. `scripts/vault-lint.sh <vault>` checks its structure.
 
 ## Risks
 
-- **Anthropic:** running the unmodified `claude` on your own subscription is allowed; hommy never wraps it in an Agent
-  SDK harness on subscription OAuth.
-- **Skipped permissions:** with `skip` (default) the agent can run commands without asking. Telegram is the only
-  door and only the paired owner passes it; use `hommy config permissions ask` if that is too much trust.
-- **WhatsApp (optional `wacli`):** it breaches WhatsApp's terms; the risk is low at personal volume, and it is off
-  unless you install it.
-- **Telegram user-account automation (optional):** the bot side carries no risk; reading your own account does, and is
-  opt-in.
-- **Signing:** there is no Developer ID. The self-signed certificate only keeps macOS privacy grants stable.
+- **Anthropic:** hommy runs the unmodified `claude` on your own subscription, which is allowed; it never wraps it in an Agent SDK harness.
+- **Skipped permissions:** with `skip` (the default) agents run commands without asking, and only the paired owner can reach them; `hommy config permissions ask` turns prompts back on.
+- **WhatsApp (`--with-whatsapp`, off by default):** `wacli` breaches WhatsApp's terms; the risk is low at personal volume.
+- **Telegram user account (`--with-telegram-user`, off by default):** automating your own account carries an account risk; the bot itself carries none.
+- **Signing:** no Developer ID; the self-signed certificate only keeps macOS privacy grants stable (Signing).
+
+## Mini App (opt-in)
+
+Off by default. With it on, the bot's 🎯 picker and its "Open" buttons open a Telegram Mini App with the session
+board and a console for one session (its screen, files, talk, pause, done). Telegram only opens Mini Apps over a public
+`https://` URL, which you provide (a reverse proxy or tunnel you run in front of the listener; hommy sets none up):
+
+```sh
+hommy config set MINIAPP_LISTEN 127.0.0.1:8473        # the hub's Mini App listener
+hommy config set MINIAPP_URL https://hommy.example.org # the public URL that reaches it
+```
+
+Only the paired owner gets in (Telegram's signed `initData`, checked on every request); everything else gets 401.
+`hommy config unset MINIAPP_LISTEN` turns it off again.
+
+## Uninstall
+
+```sh
+hommy service uninstall --purge          # services, and every file, folder and Keychain item hommy created
+~/.local/share/hommy-browsers/install.sh --uninstall && rm -rf ~/.local/share/hommy-browsers ~/.local/state/hommy-browsers
+claude plugin uninstall hommy@hommy; claude plugin uninstall hommy-browsers@hommy-browsers
+claude plugin marketplace remove hommy; claude plugin marketplace remove hommy-browsers
+brew uninstall --cask hommy
+```
+
+Your vault (`~/hommy-vault`) is never removed. The third-party tools (Homebrew, agterm, Claude Code, ffmpeg, whisper,
+llama-swap, uv, node, mlx-audio, Chrome) stay: you may use them for other things; remove them with their own
+uninstallers if not (`uv tool uninstall mlx-audio`, `brew uninstall …`).
 
 ## Development
 
@@ -239,3 +342,7 @@ with your context. `scripts/vault-lint.sh <vault>` checks its structure.
   and agent protocol.
 - Commits are scanned for personal data before they are made and pushed (`scripts/leak-scan.sh`, see the leak-gate spec);
   forks run the self-test and the secret scan without the identifier list.
+
+## License
+
+MIT, see [LICENSE](LICENSE). hommy-browsers is MIT too; every installed tool keeps its own license.
