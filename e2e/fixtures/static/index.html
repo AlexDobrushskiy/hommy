@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>hommy static fixture</title>
+</head>
+<body>
+<h1 id="title">hommy static fixture</h1>
+<p id="body">A synthetic page for browser test rows. Nothing here is real.</p>
+<form id="probe" action="#" onsubmit="document.getElementById('out').textContent = 'submitted: ' + this.q.value; return false;">
+<label for="q">Query</label>
+<input id="q" name="q" type="text" value="">
+<button id="go" type="submit">Go</button>
+</form>
+<p id="out"></p>
+</body>
+</html>
