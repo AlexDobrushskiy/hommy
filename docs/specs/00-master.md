@@ -42,8 +42,8 @@ Telegram ──▶ hub (dev.hommy.hub, 127.0.0.1:8470) ──WS──▶ host (d
 - **Single-Mac topology (default):** hub and host on one Mac under launchd, hub on loopback, host named after the
   Mac's `LocalHostName` (lowercased, `[a-z0-9-]`). **More hosts** (another Mac) run `hommy host` only, joined with
   `hommy setup --join` (§4.6) after the hub Mac sets `HUB_LISTEN` to a LAN address (plain WebSocket + host-key bearer,
-  as the source; the LAN path is documented in the README and proven over loopback, §14 D-17). No server, Docker,
-  Ansible, tunnel or egress proxy.
+  as the source; the LAN path is documented in docs/configuration.md and proven over loopback, §14 D-17). No server,
+  Docker, Ansible, tunnel or egress proxy.
 - **Reference flow** (design › What, with the invented barber): voice note → hub transcribes (whisper behind the speech
   gateway) → `new_session` job → host opens an agterm session (workspace `hommy`) running `claude` in the vault with a
   brief folder → the vault's routing table → `prompt/book-local-service.md` → lane browser (hommy-browsers) → asks the
@@ -133,7 +133,7 @@ fails start naming the key. Keys and defaults (source names kept where they exis
 `TTS_LANG_BACKENDS` keeps the source format `lang|url|model|voice`; the hub now also sends `lang_code` (the block's
 `lang`, default `en`) in every `/v1/audio/speech` request, which mlx-audio's Kokoro needs and other OpenAI-compatible
 servers ignore. Japanese, Chinese (extra G2P packages) and Russian (another engine) are optional extras added by
-`TTS_LANG_BACKENDS` lines (README › Voices), not installed by default (§14 D-7).
+`TTS_LANG_BACKENDS` lines (docs/usage.md › Voices), not installed by default (§14 D-7).
 
 **Claude environment for runs:** the host's `run_p` child keeps the source's clean environment but **keeps auth
 variables** (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`, `CLAUDE_CONFIG_DIR`) and drops only session-identity ones
@@ -587,7 +587,7 @@ runs as an overseer side task during 01, so 05 never waits on it.
 | D-14 | The plan's old phase 07 (moving the maintainer onto the kit) is gone (design D1); "Go public" is 07; alex-needs shrinks to the public go. | Alex's rulings, 2026-11-17. |
 | D-15 | **04 depends on 01 + 03, not 02**: setup's browsers/plugin/vault/context steps, `hommy vault`, the plugin/browsers/retainer doctor checks and the hooks-through-plugin rows move to **05**. **07 depends on 05**: its prep runs while 06 runs; the go step requires 06 shipped. | Takes 04 and 07's prep off the critical path (about 2.5 h) without splitting a phase or dropping a done-when. |
 | D-16 | 02's "doctor red when llama-swap is stopped" is proven with the fake speech server in 02 (E8) and with the real llama-swap in 05 (E4). | The instance has no llama-swap until 05; tests never touch the maintainer's. |
-| D-17 | Multi-host: `setup --join` and `hub host-key add` are built and proven over loopback (02-E15); the LAN listen, the macOS firewall prompt and the Local Network grant are documented in the README, not tested. | A LAN row would need a second machine or a VM↔build-Mac network path; the protocol is the source's, unchanged. |
+| D-17 | Multi-host: `setup --join` and `hub host-key add` are built and proven over loopback (02-E15); the LAN listen, the macOS firewall prompt and the Local Network grant are documented in docs/configuration.md (More hosts), not tested. | A LAN row would need a second machine or a VM↔build-Mac network path; the protocol is the source's, unchanged. |
 | D-18 | Scratch roots live in `/tmp/hm-s<N>/` and every test command runs through `scripts/sx.sh`. | Workers inherit the maintainer's `CLAUDE_CONFIG_DIR` and `CLAUDE_CODE_*`; a scratch root inside the workspace loads its private `CLAUDE.md` and overflows macOS's 104-byte socket paths in workslots. |
 | D-19 | Build tools for tests (gitleaks, shellcheck, Tart, GoReleaser, shfmt) come from pinned release assets with SHA-256 via `scripts/tools.sh` into `.dev/tools/`. | Never modify the build Mac's Homebrew; CI and local use the same versions. |
 | D-20 | Sessions the host or setup opens in agterm get the host's `HOME` (and `CLAUDE_CONFIG_DIR` when set) on their command line. | agterm starts sessions with its own environment; without this a test instance's session would run Claude on the maintainer's config, and a user with a custom `CLAUDE_CONFIG_DIR` would get a different Claude than `hommy` checked. |

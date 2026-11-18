@@ -126,7 +126,8 @@ a fresh `-p` session for a vault or `p@` target, and for a session target switch
    entry, the owner gets `Not delivered`. A reply to the owner's own line or a hub notice falls to rule 4;
 4. otherwise the current target. (An unused `Answer…` press makes the next message go to that agent, once, within 15 min.)
 
-Only the **owner's private chat** is ever routed (README › pairing). The owner is read live from the hub DB.
+Only the **owner's private chat** is ever routed ([install.md › Pairing](install.md#pairing)). The owner is read live
+from the hub DB.
 
 **Indicators:** every bot message carries a persistent reply keyboard with the current target and the two most recent
 others; a pinned line `Talking to: <label>` is edited in place; a switch posts `Now talking to <label>`.

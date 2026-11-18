@@ -1,6 +1,6 @@
 #!/bin/bash
 # The clean-room run (spec 06): a stranger's install in a fresh Tart VM with the real test bot, timed and logged.
-#   scripts/clean-room.sh run [--until setup]   fresh VM hommy-06 from the cached image, artifacts in, the README's
+#   scripts/clean-room.sh run [--until setup]   fresh VM hommy-06 from the cached image, artifacts in, the
 #                                               unattended install (--non-interactive --token-stdin, the real test bot's
 #                                               token on stdin), per-stage timings. --until setup: print the pairing
 #                                               code and wait for the install to end (the tester pairs with
@@ -31,7 +31,7 @@ FIXTURE_PORT=4715
 INSTALL_TIMEOUT=${HOMMY_CR_INSTALL_TIMEOUT:-5400} # s; the pairing wait is inside it
 ERRAND_TIMEOUT=600
 UPGRADE_VERSION=${HOMMY_CR_UPGRADE_VERSION:-0.1.1-dev}
-# The README's unattended form (docs: README › Setup flags); --source points it at the copied artifacts.
+# The unattended form (docs/install.md › Setup in detail, Unattended); --source points it at the copied artifacts.
 INSTALL=(./install.sh --source artifacts --non-interactive --token-stdin)
 
 usage() { sed -n '2,21s/^# \{0,1\}//p' "$0" >&2; exit 2; }
@@ -220,7 +220,7 @@ cmd_run() {
   errand
 }
 
-# The booking fixture inside the VM and the place row: the one non-user step besides the VM's own (README).
+# The booking fixture inside the VM and the place row: the one non-user step besides the VM's own (docs/usage.md).
 cmd_place() {
   local name=${1:?place NAME}
   RD=$(rundir)

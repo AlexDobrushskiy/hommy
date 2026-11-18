@@ -1,3 +1,8 @@
 # Reviewed images and PDFs: `<repo path> <sha256>` per line. The leak scanner can't read pixels, so every image or PDF
 # in the repo needs a line here, added after a person looked at it and found no personal data (visible text, faces,
 # EXIF/location, file names in screenshots). A changed file needs a new review and a new hash.
+
+# README screenshots: real Mini App screens, reviewed and approved for publication by the maintainer (2026-11-18).
+docs/images/errand-result.png 01c94912418027d437ac26f78803c1b2b4d35da0cd35a64271b53e0d149038ea
+docs/images/errand-voice-note.png ed1650bafedb5f51e669e568e8223ba208c81cb6fe1351dff51ec9f189595c2e
+docs/images/miniapp-board.png 37ccd87e386dbfbd90567424cac5606f8d4f3d5db1ba6002624028940cdbe508

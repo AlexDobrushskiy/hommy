@@ -7,8 +7,8 @@ VM. All fixes land in this phase's commit (`phase 06: clean room`).
 
 - **Date:** 2026-11-18. **Image:** `ghcr.io/cirruslabs/macos-golden-gate-vanilla:latest@sha256:b35695ce…a873`
   (macOS 27.2 arm64; VM disk grown to 80 GB). **hommy:** `0.0.1-dev` (snapshot), upgrade to `0.1.1-dev`.
-- **Install command** (the README's unattended form): `./install.sh --source artifacts --non-interactive
-  --token-stdin`, the real test bot's token on stdin.
+- **Install command** (the unattended form, [install.md](install.md#setup-in-detail)): `./install.sh --source artifacts
+  --non-interactive --token-stdin`, the real test bot's token on stdin.
 - **Non-user steps** (done by the harness, each logged with a timestamp): the VM's ssh key and keychain unlock;
   `~/.claude.json` onboarding done + the Claude test token in the VM's environment (stands in for the user's own
   sign-in); agterm's two first-run answers (Welcome alert, Sparkle update prompt; a real Mac's first `hommy setup`
@@ -98,7 +98,7 @@ One read of the tree (Go packages, scripts, plugin, template, installer); each r
   session (master §3; 02-E5).
 - Accessors only tests read (`Queue.Items`, `Running`, `SetHookSessions`, `Config.WithEnv`, …): small test seams.
 - `hommy send --env-file` / `$HOMMY_SEND_ENV`: documented (protocol.md §10), the agentcli tests' seam.
-- Every `scripts/*` file, config key, CLI command and flag: each is named by a spec row, the README, `e2e/README.md`
-  or CI.
+- Every `scripts/*` file, config key, CLI command and flag: each is named by a spec row, the README or `docs/`,
+  `e2e/README.md` or CI.
 - Plugin skills, guards and hooks; every vault template file (master §5–§6, 04 rows).
 - `internal/doctor/kit.go` vs `internal/setup/kit.go`: checks vs actions, not duplicates.

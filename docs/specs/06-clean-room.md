@@ -9,12 +9,12 @@ in `docs/clean-room.md` with timings.
 **Depends on:** 05. **Master:** §8, §10, I5, I6; testing.md §6–§8. The cached VM image comes from 05.
 
 ## Scope
-- **In:** `scripts/clean-room.sh run [--until setup] | place NAME | rerun [extra install flags] | upgrade` (one
-  driver: create VM `hommy-06` from the cached image, copy artifacts, run the
-  install exactly as README's unattended form with the real test bot token fed on stdin, record per-stage timings, run
-  the errand rows, collect logs to `.dev/clean-room/<run>/`, delete the VM); `docs/clean-room.md` (date, image, host
-  disk before/after, per-stage timings, each row's result, every failure with its root cause and the commit that fixed
-  it, the removal list); fixes found by the run (any phase's code; the small-fix path of the flow applies).
+- **In:** `scripts/clean-room.sh run [--until setup] | place NAME | rerun [extra install flags] | upgrade` (one driver:
+  create VM `hommy-06` from the cached image, copy artifacts, run the install exactly as the documented unattended form
+  (`docs/install.md`) with the real test bot token fed on stdin, record per-stage timings, run the errand rows, collect
+  logs to `.dev/clean-room/<run>/`, delete the VM); `docs/clean-room.md` (date, image, host disk before/after, per-stage
+  timings, each row's result, every failure with its root cause and the commit that fixed it, the removal list); fixes
+  found by the run (any phase's code; the small-fix path of the flow applies).
   **Over-engineering review:** one read of the whole tree (Go packages, scripts, plugin, template, installer) listing
   what can be removed without changing a behaviour some spec row or design decision needs; apply the removals that
   qualify, re-run the affected rows, list the rest with the reason they stay.

@@ -9,15 +9,17 @@ D-15, D-22). **Master:** I1, I3, §8.3, §9, §10 (S7), S8, §14 D-14.
 
 ## Scope
 - **In:**
-  - `README.md` (hommy): what it is (one paragraph + the reference flow with Barbearia Exemplo), the one command, what
-    it installs and from where (master §8.1 table), first steps (pairing, the first voice note, `hommy doctor`), the
-    barber demo, risks one line each (design › Risks), signing note (self-signed; why grants persist), voices and
-    extras (master §3.2, §14 D-7), Mini App opt-in, more hosts (README-only LAN steps, §14 D-17), uninstall, license.
+  - `README.md` (hommy; since 2026-11-18 an overview whose details live in the user docs it links: `docs/install.md`,
+    `usage.md`, `configuration.md`, `plugin-and-vault.md`): what it is (one paragraph + the reference flow with
+    Barbearia Exemplo), the one command, what it installs and from where (master §8.1 table), first steps (pairing, the
+    first voice note, `hommy doctor`), the barber demo, risks one line each (design › Risks), signing note (self-signed;
+    why grants persist), voices and extras (master §3.2, §14 D-7), Mini App opt-in, more hosts (LAN steps documented,
+    not tested, §14 D-17), uninstall, license.
     `hommy-browsers` README reviewed for the same reader.
   - `CHANGELOG.md` `v0.1.0`; `.goreleaser.yaml` upload switched on for tags (cask to the tap, noreply commit author).
   - Workspace `ops/go-public.sh [--dry-run|--go]`, in this order: preconditions (06 shipped, CI green on `main` of
-    both repos, tag absent, VM image cached, ≥ 60 GB free, the README's install command and flags equal
-    `scripts/clean-room.sh`'s, 07-E1 re-run); the S8 scans (below; abort on any finding);
+    both repos, tag absent, VM image cached, ≥ 60 GB free, the README's install command and the flags its user docs
+    document equal `scripts/clean-room.sh`'s, 07-E1 re-run); the S8 scans (below; abort on any finding);
     purge Actions run logs of both repos; delete `CREW_RUNS_ON` and unregister both self-hosted runners (S7: before the
     switch); `gh repo edit --visibility public --accept-visibility-change-consequences` for both repos; wait for a
     green GitHub-hosted CI run on `main`; tag `v0.1.0` and run GoReleaser on the build Mac with `GITHUB_TOKEN=$(gh auth
@@ -46,7 +48,7 @@ Pre-go (the lane's blind e2e): E1–E4. Post-go (run by `ops/go-public.sh --go`,
 
 | # | Given | When | Then |
 |---|---|---|---|
-| E1 | the bound tree | read `README.md`; follow each relative link; `grep -c 'install.sh' README.md` | sections: what, one command, what gets installed (with sources), first steps, barber demo, risks (one line each), signing, voices, Mini App, more hosts, uninstall, license; every link resolves; `≥ 1` |
+| E1 | the bound tree | read `README.md` and its user docs (`docs/install.md`, `usage.md`, `configuration.md`, `plugin-and-vault.md`); follow each relative link; `grep -c 'install.sh' README.md` | sections (in any of them): what, one command, what gets installed (with sources), first steps, barber demo, risks (one line each), signing, voices, Mini App, more hosts, uninstall, license; every link resolves; `≥ 1` |
 | E2 | maintainer-only | `GP scan` | for each of `hommy`, `hommy-browsers`, the tap: refs scanned (branches, tags, `refs/pull/*` count ≥ the merged PRs for both repos), `0` leak hits (blobs, paths, headers, messages; the tap's commit headers only after the recorded HEAD), `0` identity findings (the tap: only commits after the recorded HEAD), `0` hits in PR/release/ref text; exit 0 |
 | E3 | maintainer-only | `git ls-remote --heads origin` in both repos; `GP runs` | only `main`, this phase's PR branch and 06's in-flight refs; `runs` lists the Actions runs the go step will purge (counts per repo), deleting nothing |
 | E4 | maintainer-only | `GP --dry-run`; `gh repo view AlexDobrushskiy/hommy --json visibility`; the same for `hommy-browsers` | every precondition printed with its state (`06 shipped` may be `waiting`), every step listed in the order of the scope, nothing changed: both still `PRIVATE`, runners and `CREW_RUNS_ON` still present |
@@ -80,7 +82,8 @@ E1–E4 green and `GP --go` ready (the lane ships here); after Alex's OK, P1–P
   its digest): the build Mac's Tart cache is shared, and a prune would also drop other images. The image is kept when
   P2 fails, for `--go --from vm`.
 - **README = clean-room command:** the same `curl` part, and every flag `scripts/clean-room.sh` passes is documented
-  in the README (the clean room adds the unattended flags the README's Setup › Unattended names).
+  in the README or its user docs (the clean room adds the unattended flags `docs/install.md` › Setup in detail,
+  Unattended names).
 - **Release rehearsal** (a `--dry-run` precondition): GoReleaser on `main` tagged `v0.1.0` in a throwaway clone,
   publishing to a local fake GitHub API; it checks the archive upload, the release notes (CHANGELOG `v0.1.0`), and
   that `Casks/hommy.rb` at `0.1.0` is committed with only the noreply identity. It found `changelog.disable: true`

@@ -3,6 +3,13 @@
 How every phase's E2E rows run, and why they can never touch the maintainer's own setup. Testers' commands live in
 `e2e/README.md`; this file is the design. Master: §10, §14 D-13, D-18, D-19.
 
+## Development
+
+- [docs/specs/](specs/): the master spec and the phase specs. [docs/protocol.md](protocol.md): the hub, host
+  and agent protocol.
+- Commits are scanned for personal data before they are made and pushed (`scripts/leak-scan.sh`, see the leak-gate spec);
+  forks run the self-test and the secret scan without the identifier list.
+
 ## 1. Targets and tags
 
 A row runs against fakes unless its `#` cell carries a tag:
